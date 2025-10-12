@@ -62,7 +62,8 @@
     
     <main>
         <div class="container">
-            <div class="control-panel">
+            <div class="control-panel-layout">
+                <div class="control-panel-left">
                 <!-- Background Capture Control -->
                 <div class="control-section background-control">
                     <h2>
@@ -136,6 +137,92 @@
                             {% for log_line in capture_log %}
                                 <div class="log-line">{{ log_line }}</div>
                             {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                </div>
+
+                <!-- Settings Panel on the Right -->
+                <div class="control-panel-right">
+                    <div class="control-section settings-panel">
+                        <h2>Location & Settings</h2>
+
+                        <!-- Location Settings -->
+                        <div class="settings-group">
+                            <h3>Location</h3>
+                            <div class="setting-item">
+                                <label for="latitude">Latitude:</label>
+                                <input type="number" id="latitude" step="0.0001" min="-90" max="90"
+                                       placeholder="e.g., 40.7128" value="">
+                                <span class="setting-hint">-90 to 90</span>
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="longitude">Longitude:</label>
+                                <input type="number" id="longitude" step="0.0001" min="-180" max="180"
+                                       placeholder="e.g., -74.0060" value="">
+                                <span class="setting-hint">-180 to 180</span>
+                            </div>
+                        </div>
+
+                        <!-- Time Settings -->
+                        <div class="settings-group">
+                            <h3>Time Settings</h3>
+                            <div class="setting-item">
+                                <label for="dstEnabled">
+                                    <input type="checkbox" id="dstEnabled">
+                                    Daylight Saving Time
+                                </label>
+                            </div>
+
+                            <div class="setting-item">
+                                <label for="timezone">Timezone Offset (hours):</label>
+                                <input type="number" id="timezone" step="0.5" min="-12" max="14"
+                                       placeholder="e.g., -5" value="">
+                                <span class="setting-hint">UTC offset</span>
+                            </div>
+                        </div>
+
+                        <!-- Weather API Settings -->
+                        <div class="settings-group">
+                            <h3>Weather API</h3>
+                            <div class="setting-item">
+                                <label for="openweatherApiKey">OpenWeather API Key:</label>
+                                <input type="text" id="openweatherApiKey"
+                                       placeholder="Enter API key" value="">
+                                <span class="setting-hint">Get free API key at <a href="https://openweathermap.org/api" target="_blank">openweathermap.org</a></span>
+                            </div>
+                        </div>
+
+                        <!-- Save Button -->
+                        <div class="settings-actions">
+                            <button id="saveSettingsButton" class="primary-button">Save Settings</button>
+                            <div id="settingsStatus" class="settings-status"></div>
+                        </div>
+
+                        <!-- Solar Information Display -->
+                        <div class="settings-group solar-info">
+                            <h3>Solar Information</h3>
+                            <div class="solar-info-item">
+                                <span class="solar-label">Sunrise:</span>
+                                <span id="sunriseTime" class="solar-value">--:--</span>
+                            </div>
+                            <div class="solar-info-item">
+                                <span class="solar-label">Sunset:</span>
+                                <span id="sunsetTime" class="solar-value">--:--</span>
+                            </div>
+                            <div class="solar-info-item">
+                                <span class="solar-label">Civil Twilight:</span>
+                                <span id="civilTwilight" class="solar-value">--:--</span>
+                            </div>
+                            <div class="solar-info-item">
+                                <span class="solar-label">Nautical Twilight:</span>
+                                <span id="nauticalTwilight" class="solar-value">--:--</span>
+                            </div>
+                            <div class="solar-info-item">
+                                <span class="solar-label">Astronomical Darkness:</span>
+                                <span id="astroTwilight" class="solar-value">--:--</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -271,6 +358,104 @@
         
         // Initial status update
         updateStatus();
+
+        // Settings Management
+        function loadSettings() {
+            fetch('/api/settings')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.latitude !== null) document.getElementById('latitude').value = data.latitude;
+                    if (data.longitude !== null) document.getElementById('longitude').value = data.longitude;
+                    if (data.timezone !== null) document.getElementById('timezone').value = data.timezone;
+                    document.getElementById('dstEnabled').checked = data.dst_enabled || false;
+                    if (data.openweather_api_key !== null) document.getElementById('openweatherApiKey').value = data.openweather_api_key;
+
+                    // Update solar info if location is set
+                    if (data.latitude !== null && data.longitude !== null) {
+                        updateSolarInfo();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading settings:', error);
+                });
+        }
+
+        function saveSettings() {
+            const latitude = document.getElementById('latitude').value;
+            const longitude = document.getElementById('longitude').value;
+            const timezone = document.getElementById('timezone').value;
+            const dstEnabled = document.getElementById('dstEnabled').checked;
+            const openweatherApiKey = document.getElementById('openweatherApiKey').value;
+
+            const settings = {
+                latitude: latitude ? parseFloat(latitude) : null,
+                longitude: longitude ? parseFloat(longitude) : null,
+                timezone: timezone ? parseFloat(timezone) : null,
+                dst_enabled: dstEnabled,
+                openweather_api_key: openweatherApiKey || null
+            };
+
+            fetch('/api/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(settings)
+            })
+            .then(response => response.json())
+            .then(data => {
+                const statusEl = document.getElementById('settingsStatus');
+                if (data.status === 'success') {
+                    statusEl.textContent = data.message;
+                    statusEl.className = 'settings-status success';
+
+                    // Update solar info
+                    if (latitude && longitude) {
+                        updateSolarInfo();
+                    }
+                } else {
+                    statusEl.textContent = data.message;
+                    statusEl.className = 'settings-status error';
+                }
+
+                // Clear status after 3 seconds
+                setTimeout(() => {
+                    statusEl.textContent = '';
+                    statusEl.className = 'settings-status';
+                }, 3000);
+            })
+            .catch(error => {
+                const statusEl = document.getElementById('settingsStatus');
+                statusEl.textContent = 'Error saving settings';
+                statusEl.className = 'settings-status error';
+            });
+        }
+
+        function updateSolarInfo() {
+            fetch('/api/solar_info')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById('sunriseTime').textContent = data.sunrise || '--:--';
+                        document.getElementById('sunsetTime').textContent = data.sunset || '--:--';
+                        document.getElementById('civilTwilight').textContent = data.civil_twilight_end || '--:--';
+                        document.getElementById('nauticalTwilight').textContent = data.nautical_twilight_end || '--:--';
+                        document.getElementById('astroTwilight').textContent = data.astronomical_twilight_end || '--:--';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading solar info:', error);
+                });
+        }
+
+        // Event listeners for settings
+        document.getElementById('saveSettingsButton').addEventListener('click', saveSettings);
+
+        // Load settings on page load
+        loadSettings();
+
+        // Update solar info every hour
+        setInterval(updateSolarInfo, 3600000);
     </script>
 </body>
 </html>

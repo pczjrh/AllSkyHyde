@@ -21,75 +21,169 @@
     <main>
         <div class="container">
             {% if latest_image %}
-                <div class="image-container">
-                    <div class="image-wrapper" id="imageWrapper">
-                        <img id="zoomableImage" src="{{ url_for('serve_image', filename=latest_image.filename) }}" 
-                             alt="Latest ZWO Image" data-filename="{{ latest_image.filename }}">
+                <div class="index-layout">
+                    <!-- Image Section -->
+                    <div class="index-main">
+                        <div class="image-container">
+                            <div class="image-wrapper" id="imageWrapper">
+                                <img id="zoomableImage" src="{{ url_for('serve_image', filename=latest_image.filename) }}"
+                                     alt="Latest ZWO Image" data-filename="{{ latest_image.filename }}">
+                            </div>
+
+                            <div class="image-controls">
+                                <button id="zoomIn">Zoom In</button>
+                                <button id="zoomOut">Zoom Out</button>
+                                <button id="resetZoom">Reset</button>
+                                <span class="zoom-level">Zoom: <span id="zoomLevel">100%</span></span>
+                            </div>
+
+                            <div class="metadata-panel">
+                                <h3>Image Information</h3>
+                                <table>
+                                    <tr>
+                                        <th>Filename:</th>
+                                        <td>{{ latest_image.filename }}</td>
+                                    </tr>
+                                    {% if latest_image.timestamp %}
+                                    <tr>
+                                        <th>Captured:</th>
+                                        <td>{{ latest_image.timestamp }}</td>
+                                    </tr>
+                                    {% endif %}
+                                    {% if latest_image.exposure_ms %}
+                                    <tr>
+                                        <th>Exposure:</th>
+                                        <td>{{ latest_image.exposure_ms }} ms</td>
+                                    </tr>
+                                    {% endif %}
+                                    <tr>
+                                        <th>File Size:</th>
+                                        <td>{{ latest_image.size_mb }} MB</td>
+                                    </tr>
+                                    <tr>
+                                        <th>Last Modified:</th>
+                                        <td>{{ latest_image.modified.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                    </tr>
+                                </table>
+
+                                <div class="action-buttons">
+                                    <a href="{{ url_for('image_detail', filename=latest_image.filename) }}" class="button">View Details</a>
+                                    <a href="{{ url_for('serve_image', filename=latest_image.filename) }}"
+                                       download="{{ latest_image.filename }}" class="button">Download</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="next-capture-container">
+                            <h3>Next Capture</h3>
+                            <div class="countdown-display">
+                                <div id="countdown-timer">--:--:--</div>
+                                <div class="progress-container">
+                                    <div id="capture-progress-bar" class="progress-bar-fill"></div>
+                                </div>
+                                <div class="countdown-label">
+                                    <span>Next image in <span id="countdown-text">calculating...</span></span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    
-                    <div class="image-controls">
-                        <button id="zoomIn">Zoom In</button>
-                        <button id="zoomOut">Zoom Out</button>
-                        <button id="resetZoom">Reset</button>
-                        <span class="zoom-level">Zoom: <span id="zoomLevel">100%</span></span>
-                    </div>
-                    
-                    <div class="metadata-panel">
-                        <h3>Image Information</h3>
-                        <table>
-                            <tr>
-                                <th>Filename:</th>
-                                <td>{{ latest_image.filename }}</td>
-                            </tr>
-                            {% if latest_image.timestamp %}
-                            <tr>
-                                <th>Captured:</th>
-                                <td>{{ latest_image.timestamp }}</td>
-                            </tr>
-                            {% endif %}
-                            {% if latest_image.exposure_ms %}
-                            <tr>
-                                <th>Exposure:</th>
-                                <td>{{ latest_image.exposure_ms }} ms</td>
-                            </tr>
-                            {% endif %}
-                            <tr>
-                                <th>File Size:</th>
-                                <td>{{ latest_image.size_mb }} MB</td>
-                            </tr>
-                            <tr>
-                                <th>Last Modified:</th>
-                                <td>{{ latest_image.modified.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                            </tr>
-                        </table>
-                        
-                        <div class="action-buttons">
-                            <a href="{{ url_for('image_detail', filename=latest_image.filename) }}" class="button">View Details</a>
-                            <a href="{{ url_for('serve_image', filename=latest_image.filename) }}" 
-                               download="{{ latest_image.filename }}" class="button">Download</a>
+
+                    <!-- Night Information Panel -->
+                    <div class="index-sidebar">
+                        <div class="night-info-panel">
+                            <h3>Night Sky Info</h3>
+
+                            <!-- Sun Times -->
+                            <div class="info-card">
+                                <div class="info-icon-large">🌅</div>
+                                <div class="info-content">
+                                    <div class="info-label">Sunrise</div>
+                                    <div class="info-value" id="sunriseValue">--:--</div>
+                                </div>
+                            </div>
+
+                            <div class="info-card">
+                                <div class="info-icon-large">🌇</div>
+                                <div class="info-content">
+                                    <div class="info-label">Sunset</div>
+                                    <div class="info-value" id="sunsetValue">--:--</div>
+                                </div>
+                            </div>
+
+                            <!-- Astronomical Darkness -->
+                            <div class="info-card">
+                                <div class="info-icon-large">✨</div>
+                                <div class="info-content">
+                                    <div class="info-label">Darkness Begins</div>
+                                    <div class="info-value" id="astroTwilightValue">--:--</div>
+                                </div>
+                            </div>
+
+                            <!-- Moon Phase -->
+                            <div class="info-card moon-card">
+                                <div class="info-icon-large" id="moonIcon">🌑</div>
+                                <div class="info-content">
+                                    <div class="info-label">Moon Phase</div>
+                                    <div class="info-value" id="moonPhaseName">New Moon</div>
+                                    <div class="info-sublabel" id="moonIllumination">0% illuminated</div>
+                                </div>
+                            </div>
+
+                            <!-- Imaging Time -->
+                            <div class="info-card imaging-card">
+                                <div class="info-icon-large">📸</div>
+                                <div class="info-content">
+                                    <div class="info-label">Imaging Time</div>
+                                    <div class="info-value" id="imagingTimeRemaining">--h --m</div>
+                                    <div class="info-sublabel" id="imagingTimeDetail">Until sunrise</div>
+                                </div>
+                            </div>
+
+                            <!-- Weather -->
+                            <div class="info-card weather-card-main">
+                                <div class="info-icon-xlarge" id="weatherIcon">🌤</div>
+                                <div class="info-content">
+                                    <div class="info-label">Weather</div>
+                                    <div class="info-value" id="weatherDescription">Loading...</div>
+                                </div>
+                            </div>
+
+                            <!-- Weather Details Grid -->
+                            <div class="weather-details-grid">
+                                <div class="weather-detail-box">
+                                    <div class="weather-detail-icon">☁️</div>
+                                    <div class="weather-detail-label">Cloud Cover</div>
+                                    <div class="weather-detail-value" id="weatherClouds">--%</div>
+                                </div>
+                                <div class="weather-detail-box">
+                                    <div class="weather-detail-icon">💧</div>
+                                    <div class="weather-detail-label">Humidity</div>
+                                    <div class="weather-detail-value" id="weatherHumidity">--%</div>
+                                </div>
+                                <div class="weather-detail-box">
+                                    <div class="weather-detail-icon">🌡️</div>
+                                    <div class="weather-detail-label">Temperature</div>
+                                    <div class="weather-detail-value" id="weatherTemperature">--°C</div>
+                                </div>
+                                <div class="weather-detail-box">
+                                    <div class="weather-detail-icon">🔽</div>
+                                    <div class="weather-detail-label">Pressure</div>
+                                    <div class="weather-detail-value" id="weatherPressure">-- hPa</div>
+                                </div>
+                                <div class="weather-detail-box">
+                                    <div class="weather-detail-icon">💨</div>
+                                    <div class="weather-detail-label">Wind Speed</div>
+                                    <div class="weather-detail-value" id="weatherWindSpeed">-- m/s</div>
+                                </div>
+                                <div class="weather-detail-box">
+                                    <div class="weather-detail-icon">🌬️</div>
+                                    <div class="weather-detail-label">Wind Gusts</div>
+                                    <div class="weather-detail-value" id="weatherWindGust">-- m/s</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                
-                <div class="auto-refresh">
-                    <label>
-                        <input type="checkbox" id="autoRefresh" checked> 
-                        Auto-refresh every <input type="number" id="refreshInterval" value="300" min="30"> seconds
-                    </label>
-                    <button id="manualRefresh">Refresh Now</button>
-                </div>
-            <div class="next-capture-container">
-                        <h3>Next Capture</h3>
-                        <div class="countdown-display">
-                            <div id="countdown-timer">--:--:--</div>
-                            <div class="progress-container">
-                                <div id="capture-progress-bar" class="progress-bar-fill"></div>
-                            </div>
-                            <div class="countdown-label">
-                                <span>Next image in <span id="countdown-text">calculating...</span></span>
-                            </div>
-                        </div>
-            </div>
             {% else %}
                 <div class="no-image">
                     <p>No images found in the directory.</p>
@@ -283,5 +377,88 @@
 
         // Start the countdown
         updateCaptureCountdown();
+
+        // Load night sky information
+        function updateNightInfo() {
+            fetch('/api/night_info')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        // Update sunrise/sunset
+                        document.getElementById('sunriseValue').textContent = data.sunrise || '--:--';
+                        document.getElementById('sunsetValue').textContent = data.sunset || '--:--';
+                        document.getElementById('astroTwilightValue').textContent = data.astronomical_twilight_end || '--:--';
+
+                        // Update moon phase
+                        document.getElementById('moonIcon').textContent = data.moon_icon || '🌑';
+                        document.getElementById('moonPhaseName').textContent = data.moon_phase_name || 'Unknown';
+                        document.getElementById('moonIllumination').textContent = data.moon_illumination || '0% illuminated';
+
+                        // Update imaging time
+                        document.getElementById('imagingTimeRemaining').textContent = data.imaging_time_remaining || '--h --m';
+                        document.getElementById('imagingTimeDetail').textContent = data.imaging_time_detail || 'Until sunrise';
+
+                        // Update weather icon and description
+                        document.getElementById('weatherIcon').textContent = data.weather_icon || '🌤';
+                        document.getElementById('weatherDescription').textContent = data.weather_description || 'Not available';
+
+                        // Update weather detail boxes
+                        if (data.weather_clouds !== null && data.weather_clouds !== undefined) {
+                            document.getElementById('weatherClouds').textContent = `${data.weather_clouds}%`;
+                        } else {
+                            document.getElementById('weatherClouds').textContent = '--%';
+                        }
+
+                        if (data.weather_humidity !== null && data.weather_humidity !== undefined) {
+                            document.getElementById('weatherHumidity').textContent = `${data.weather_humidity}%`;
+                        } else {
+                            document.getElementById('weatherHumidity').textContent = '--%';
+                        }
+
+                        if (data.weather_temperature !== null && data.weather_temperature !== undefined) {
+                            document.getElementById('weatherTemperature').textContent = `${data.weather_temperature.toFixed(1)}°C`;
+                        } else {
+                            document.getElementById('weatherTemperature').textContent = '--°C';
+                        }
+
+                        if (data.weather_pressure !== null && data.weather_pressure !== undefined) {
+                            document.getElementById('weatherPressure').textContent = `${data.weather_pressure} hPa`;
+                        } else {
+                            document.getElementById('weatherPressure').textContent = '-- hPa';
+                        }
+
+                        if (data.weather_wind_speed !== null && data.weather_wind_speed !== undefined) {
+                            document.getElementById('weatherWindSpeed').textContent = `${data.weather_wind_speed.toFixed(1)} m/s`;
+                        } else {
+                            document.getElementById('weatherWindSpeed').textContent = '-- m/s';
+                        }
+
+                        if (data.weather_wind_gust !== null && data.weather_wind_gust !== undefined) {
+                            document.getElementById('weatherWindGust').textContent = `${data.weather_wind_gust.toFixed(1)} m/s`;
+                        } else {
+                            document.getElementById('weatherWindGust').textContent = '-- m/s';
+                        }
+                    } else {
+                        console.error('Error fetching night info:', data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching night info:', error);
+                });
+        }
+
+        // Update night info on page load and then on the hour
+        updateNightInfo();
+
+        // Calculate milliseconds until the next hour
+        const now = new Date();
+        const msUntilNextHour = (60 - now.getMinutes()) * 60 * 1000 - now.getSeconds() * 1000 - now.getMilliseconds();
+
+        // Update on the hour
+        setTimeout(function() {
+            updateNightInfo();
+            // Then update every hour
+            setInterval(updateNightInfo, 60 * 60 * 1000);
+        }, msUntilNextHour);
     });
 </script>

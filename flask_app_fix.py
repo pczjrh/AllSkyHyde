@@ -17,6 +17,7 @@ app = Flask(__name__)
 # Configure this to match your output directory
 IMAGE_DIR = "/home/kickpi/zwo_images/zwo_images"
 SCRIPT_PATH = "/home/kickpi/zwo_images/test5.py"  # Path to your capture script
+CONFIG_FILE = "app_config.json"  # Configuration file for persistent settings
 
 # Global variables to track capture process
 capture_interval = 300  # Default 5 minutes
@@ -25,6 +26,69 @@ capture_log = []
 capture_thread = None
 stop_capture_flag = False
 last_capture_time = None
+
+# Global settings storage
+app_settings = {
+    "latitude": None,
+    "longitude": None,
+    "timezone": None,
+    "dst_enabled": False,
+    "openweather_api_key": None
+}
+
+
+def load_config():
+    """Load configuration from JSON file"""
+    global app_settings, capture_interval, IMAGE_DIR, SCRIPT_PATH
+
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+
+                # Load settings
+                if 'settings' in config:
+                    app_settings.update(config['settings'])
+
+                # Load capture interval
+                if 'capture_interval' in config:
+                    capture_interval = config['capture_interval']
+
+                # Load paths (optional, can be overridden)
+                if 'image_dir' in config:
+                    IMAGE_DIR = config['image_dir']
+                if 'script_path' in config:
+                    SCRIPT_PATH = config['script_path']
+
+                app.logger.info(f"Configuration loaded from {CONFIG_FILE}")
+                return True
+    except Exception as e:
+        app.logger.error(f"Error loading configuration: {str(e)}")
+
+    return False
+
+
+def save_config():
+    """Save configuration to JSON file"""
+    global app_settings, capture_interval, IMAGE_DIR, SCRIPT_PATH
+
+    try:
+        config = {
+            "settings": app_settings,
+            "capture_interval": capture_interval,
+            "image_dir": IMAGE_DIR,
+            "script_path": SCRIPT_PATH,
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+
+        app.logger.info(f"Configuration saved to {CONFIG_FILE}")
+        return True
+    except Exception as e:
+        app.logger.error(f"Error saving configuration: {str(e)}")
+        return False
 
 
 def extract_metadata_from_filename(filename):
@@ -353,6 +417,9 @@ def api_set_interval():
 
         capture_interval = new_interval
 
+        # Save configuration to file
+        save_config()
+
         # If background capture is running, restart it with new interval
         if capture_thread and capture_thread.is_alive():
             stop_background_capture()
@@ -541,8 +608,466 @@ def get_directory_size(path):
     return total_size
 
 
+@app.route('/api/settings', methods=['GET', 'POST'])
+def api_settings():
+    """Get or update application settings"""
+    global app_settings
+
+    if request.method == 'GET':
+        return jsonify(app_settings)
+
+    elif request.method == 'POST':
+        try:
+            data = request.get_json(force=True)
+
+            # Update settings
+            if 'latitude' in data:
+                app_settings['latitude'] = data['latitude']
+            if 'longitude' in data:
+                app_settings['longitude'] = data['longitude']
+            if 'timezone' in data:
+                app_settings['timezone'] = data['timezone']
+            if 'dst_enabled' in data:
+                app_settings['dst_enabled'] = data['dst_enabled']
+            if 'openweather_api_key' in data:
+                app_settings['openweather_api_key'] = data['openweather_api_key']
+
+            # Save configuration to file
+            save_config()
+
+            return jsonify({
+                "status": "success",
+                "message": "Settings saved successfully"
+            })
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Error saving settings: {str(e)}"
+            }), 500
+
+
+@app.route('/api/solar_info')
+def api_solar_info():
+    """Calculate and return solar information based on location settings"""
+    global app_settings
+
+    if app_settings['latitude'] is None or app_settings['longitude'] is None:
+        return jsonify({
+            "status": "error",
+            "message": "Location not set"
+        })
+
+    try:
+        from datetime import datetime, timedelta
+        import math
+
+        # Get current date
+        now = datetime.now()
+        lat = app_settings['latitude']
+        lon = app_settings['longitude']
+
+        # Calculate solar times (simplified calculation)
+        # For production, consider using a library like ephem or astral
+
+        def calculate_solar_noon(lon):
+            """Calculate solar noon in UTC"""
+            return 12.0 - (lon / 15.0)
+
+        def calculate_sunrise_sunset(lat, lon, date):
+            """Simplified sunrise/sunset calculation"""
+            # This is a basic approximation. For accurate results, use astral or ephem library
+            day_of_year = date.timetuple().tm_yday
+
+            # Solar declination
+            declination = 23.45 * math.sin(math.radians((360/365) * (day_of_year - 81)))
+
+            # Hour angle
+            lat_rad = math.radians(lat)
+            dec_rad = math.radians(declination)
+
+            cos_hour_angle = -math.tan(lat_rad) * math.tan(dec_rad)
+
+            # Check if sun rises/sets
+            if cos_hour_angle > 1:
+                # Polar night
+                return None, None
+            elif cos_hour_angle < -1:
+                # Midnight sun
+                return "00:00", "23:59"
+
+            hour_angle = math.degrees(math.acos(cos_hour_angle))
+
+            solar_noon = calculate_solar_noon(lon)
+            sunrise_hour = solar_noon - (hour_angle / 15.0)
+            sunset_hour = solar_noon + (hour_angle / 15.0)
+
+            # Apply timezone offset
+            tz_offset = app_settings.get('timezone', 0) or 0
+            if app_settings.get('dst_enabled'):
+                tz_offset += 1
+
+            sunrise_hour += tz_offset
+            sunset_hour += tz_offset
+
+            # Format times
+            def format_time(hour):
+                hour = hour % 24
+                hours = int(hour)
+                minutes = int((hour - hours) * 60)
+                return f"{hours:02d}:{minutes:02d}"
+
+            return format_time(sunrise_hour), format_time(sunset_hour)
+
+        sunrise, sunset = calculate_sunrise_sunset(lat, lon, now)
+
+        if sunrise is None or sunset is None:
+            return jsonify({
+                "status": "error",
+                "message": "Unable to calculate solar times for this location"
+            })
+
+        # Calculate twilight times (6°, 12°, 18° below horizon)
+        # For simplicity, adding approximate offsets
+        def parse_time(time_str):
+            h, m = map(int, time_str.split(':'))
+            return h + m/60
+
+        def format_time(hour):
+            hour = hour % 24
+            hours = int(hour)
+            minutes = int((hour - hours) * 60)
+            return f"{hours:02d}:{minutes:02d}"
+
+        sunset_hour = parse_time(sunset)
+
+        # Approximate twilight durations (varies by latitude)
+        civil_twilight = format_time(sunset_hour + 0.5)  # ~30 min after sunset
+        nautical_twilight = format_time(sunset_hour + 1.0)  # ~1 hour after sunset
+        astronomical_twilight = format_time(sunset_hour + 1.5)  # ~1.5 hours after sunset
+
+        return jsonify({
+            "status": "success",
+            "sunrise": sunrise,
+            "sunset": sunset,
+            "civil_twilight_end": civil_twilight,
+            "nautical_twilight_end": nautical_twilight,
+            "astronomical_twilight_end": astronomical_twilight
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error calculating solar info: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "status": "error",
+            "message": f"Error: {str(e)}"
+        }), 500
+
+
+@app.route('/api/night_info')
+def api_night_info():
+    """Calculate and return night sky information including moon phase and imaging time"""
+    global app_settings
+
+    if app_settings['latitude'] is None or app_settings['longitude'] is None:
+        return jsonify({
+            "status": "error",
+            "message": "Location not set. Please configure your location in the Control Panel."
+        })
+
+    try:
+        from datetime import datetime, timedelta
+        import math
+
+        now = datetime.now()
+        lat = app_settings['latitude']
+        lon = app_settings['longitude']
+
+        # Calculate solar times using the same function from api_solar_info
+        def calculate_solar_noon(lon):
+            return 12.0 - (lon / 15.0)
+
+        def calculate_sunrise_sunset(lat, lon, date):
+            day_of_year = date.timetuple().tm_yday
+            declination = 23.45 * math.sin(math.radians((360/365) * (day_of_year - 81)))
+            lat_rad = math.radians(lat)
+            dec_rad = math.radians(declination)
+            cos_hour_angle = -math.tan(lat_rad) * math.tan(dec_rad)
+
+            if cos_hour_angle > 1:
+                return None, None
+            elif cos_hour_angle < -1:
+                return "00:00", "23:59"
+
+            hour_angle = math.degrees(math.acos(cos_hour_angle))
+            solar_noon = calculate_solar_noon(lon)
+            sunrise_hour = solar_noon - (hour_angle / 15.0)
+            sunset_hour = solar_noon + (hour_angle / 15.0)
+
+            tz_offset = app_settings.get('timezone', 0) or 0
+            if app_settings.get('dst_enabled'):
+                tz_offset += 1
+
+            sunrise_hour += tz_offset
+            sunset_hour += tz_offset
+
+            def format_time(hour):
+                hour = hour % 24
+                hours = int(hour)
+                minutes = int((hour - hours) * 60)
+                return f"{hours:02d}:{minutes:02d}"
+
+            return format_time(sunrise_hour), format_time(sunset_hour)
+
+        sunrise, sunset = calculate_sunrise_sunset(lat, lon, now)
+
+        if sunrise is None or sunset is None:
+            return jsonify({
+                "status": "error",
+                "message": "Unable to calculate solar times for this location"
+            })
+
+        # Calculate twilight times
+        def parse_time(time_str):
+            h, m = map(int, time_str.split(':'))
+            return h + m/60
+
+        def format_time(hour):
+            hour = hour % 24
+            hours = int(hour)
+            minutes = int((hour - hours) * 60)
+            return f"{hours:02d}:{minutes:02d}"
+
+        sunset_hour = parse_time(sunset)
+        astronomical_twilight = format_time(sunset_hour + 1.5)
+
+        # Calculate moon phase
+        def calculate_moon_phase(date):
+            """Calculate moon phase and illumination percentage"""
+            # Known new moon date
+            known_new_moon = datetime(2000, 1, 6, 18, 14)
+            synodic_month = 29.53058867  # days
+
+            days_since = (date - known_new_moon).total_seconds() / 86400
+            moon_age = days_since % synodic_month
+            phase = moon_age / synodic_month
+
+            # Calculate illumination
+            illumination = (1 - math.cos(2 * math.pi * phase)) / 2 * 100
+
+            # Determine phase name and icon
+            if phase < 0.0625:
+                phase_name = "New Moon"
+                icon = "🌑"
+            elif phase < 0.1875:
+                phase_name = "Waxing Crescent"
+                icon = "🌒"
+            elif phase < 0.3125:
+                phase_name = "First Quarter"
+                icon = "🌓"
+            elif phase < 0.4375:
+                phase_name = "Waxing Gibbous"
+                icon = "🌔"
+            elif phase < 0.5625:
+                phase_name = "Full Moon"
+                icon = "🌕"
+            elif phase < 0.6875:
+                phase_name = "Waning Gibbous"
+                icon = "🌖"
+            elif phase < 0.8125:
+                phase_name = "Last Quarter"
+                icon = "🌗"
+            elif phase < 0.9375:
+                phase_name = "Waning Crescent"
+                icon = "🌘"
+            else:
+                phase_name = "New Moon"
+                icon = "🌑"
+
+            return {
+                "phase_name": phase_name,
+                "icon": icon,
+                "illumination": f"{illumination:.0f}% illuminated"
+            }
+
+        moon_data = calculate_moon_phase(now)
+
+        # Calculate imaging time remaining (only astronomical darkness)
+        current_hour = now.hour + now.minute / 60
+        sunrise_hour_float = parse_time(sunrise)
+        sunset_hour_float = parse_time(sunset)
+        astro_twilight_float = parse_time(astronomical_twilight)
+
+        # Calculate when astronomical twilight begins in the morning (approximately 1.5 hours before sunrise)
+        sunrise_hour_float_prev = sunrise_hour_float
+        if sunrise_hour_float < 1.5:
+            sunrise_hour_float_prev = sunrise_hour_float + 24
+        astro_twilight_morning = sunrise_hour_float_prev - 1.5
+
+        # Determine if we're currently in astronomical darkness
+        is_dark = False
+        if astro_twilight_float < sunrise_hour_float:
+            # Normal case: darkness period doesn't cross midnight
+            is_dark = current_hour >= astro_twilight_float and current_hour < astro_twilight_morning
+        else:
+            # Darkness period crosses midnight
+            is_dark = current_hour >= astro_twilight_float or current_hour < astro_twilight_morning
+
+        if is_dark:
+            # We're in darkness now - calculate time until morning twilight begins
+            if current_hour >= astro_twilight_float:
+                # Same night
+                hours_remaining = (24 - current_hour) + astro_twilight_morning if astro_twilight_morning < current_hour else astro_twilight_morning - current_hour
+            else:
+                # Early morning before dawn
+                hours_remaining = astro_twilight_morning - current_hour
+            detail = "of darkness remaining"
+        else:
+            # We're in daylight - calculate time until next darkness
+            if current_hour < sunset_hour_float:
+                hours_remaining = astro_twilight_float - current_hour
+                detail = "until darkness begins"
+            else:
+                # Between sunset and astro twilight
+                hours_remaining = astro_twilight_float - current_hour
+                if hours_remaining < 0:
+                    # After midnight case
+                    hours_remaining = (24 - current_hour) + astro_twilight_float
+                detail = "until darkness begins"
+
+        # Format imaging time
+        hours = int(hours_remaining)
+        minutes = int((hours_remaining - hours) * 60)
+        imaging_time_str = f"{hours}h {minutes}m"
+
+        # Fetch weather data from OpenWeather API
+        weather_data = {
+            "description": "Not available",
+            "icon": "🌤",
+            "clouds": None,
+            "rain": None,
+            "temperature": None,
+            "humidity": None,
+            "pressure": None,
+            "wind_speed": None,
+            "wind_gust": None
+        }
+
+        if app_settings.get('openweather_api_key'):
+            try:
+                import requests
+                api_key = app_settings['openweather_api_key']
+
+                # Strip any whitespace from API key
+                api_key = api_key.strip() if isinstance(api_key, str) else api_key
+
+                weather_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+
+                app.logger.info(f"Fetching weather data from OpenWeather API for lat={lat}, lon={lon}")
+
+                response = requests.get(weather_url, timeout=10)
+
+                app.logger.info(f"OpenWeather API response status: {response.status_code}")
+
+                if response.status_code == 200:
+                    weather_json = response.json()
+
+                    app.logger.info(f"Weather data received: {weather_json.get('weather', [{}])[0].get('description', 'Unknown')}")
+
+                    # Extract weather information
+                    weather_data["description"] = weather_json.get("weather", [{}])[0].get("description", "Unknown").capitalize()
+                    weather_data["temperature"] = weather_json.get("main", {}).get("temp")
+                    weather_data["humidity"] = weather_json.get("main", {}).get("humidity")
+                    weather_data["pressure"] = weather_json.get("main", {}).get("pressure")
+                    weather_data["clouds"] = weather_json.get("clouds", {}).get("all")  # Cloud coverage percentage
+
+                    # Rain data (if available)
+                    if "rain" in weather_json:
+                        weather_data["rain"] = weather_json["rain"].get("1h", 0)  # Rain volume for last hour
+                    else:
+                        weather_data["rain"] = 0
+
+                    # Wind data
+                    weather_data["wind_speed"] = weather_json.get("wind", {}).get("speed")
+                    weather_data["wind_gust"] = weather_json.get("wind", {}).get("gust")
+
+                    # Map OpenWeather icon codes to emoji
+                    weather_code = weather_json.get("weather", [{}])[0].get("icon", "01d")
+                    icon_map = {
+                        "01d": "☀️", "01n": "🌙",  # Clear sky
+                        "02d": "🌤", "02n": "🌤",  # Few clouds
+                        "03d": "☁️", "03n": "☁️",  # Scattered clouds
+                        "04d": "☁️", "04n": "☁️",  # Broken clouds
+                        "09d": "🌧", "09n": "🌧",  # Shower rain
+                        "10d": "🌦", "10n": "🌦",  # Rain
+                        "11d": "⛈", "11n": "⛈",   # Thunderstorm
+                        "13d": "🌨", "13n": "🌨",  # Snow
+                        "50d": "🌫", "50n": "🌫"   # Mist
+                    }
+                    weather_data["icon"] = icon_map.get(weather_code, "🌤")
+                else:
+                    error_msg = f"OpenWeather API error: {response.status_code}"
+                    try:
+                        error_data = response.json()
+                        error_msg += f" - {error_data.get('message', 'Unknown error')}"
+                    except:
+                        error_msg += f" - {response.text[:200]}"
+                    app.logger.error(error_msg)
+                    weather_data["description"] = "API Error"
+
+            except requests.exceptions.Timeout:
+                app.logger.error("OpenWeather API request timed out")
+                weather_data["description"] = "Request timeout"
+            except requests.exceptions.RequestException as e:
+                app.logger.error(f"OpenWeather API request failed: {str(e)}")
+                weather_data["description"] = "Request failed"
+            except Exception as e:
+                app.logger.error(f"Error fetching weather data: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                weather_data["description"] = "Error"
+        else:
+            app.logger.info("No OpenWeather API key configured")
+
+        return jsonify({
+            "status": "success",
+            "sunrise": sunrise,
+            "sunset": sunset,
+            "astronomical_twilight_end": astronomical_twilight,
+            "moon_phase_name": moon_data["phase_name"],
+            "moon_icon": moon_data["icon"],
+            "moon_illumination": moon_data["illumination"],
+            "imaging_time_remaining": imaging_time_str,
+            "imaging_time_detail": detail,
+            "weather_description": weather_data["description"],
+            "weather_icon": weather_data["icon"],
+            "weather_clouds": weather_data["clouds"],
+            "weather_rain": weather_data["rain"],
+            "weather_temperature": weather_data["temperature"],
+            "weather_humidity": weather_data["humidity"],
+            "weather_pressure": weather_data["pressure"],
+            "weather_wind_speed": weather_data["wind_speed"],
+            "weather_wind_gust": weather_data["wind_gust"]
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error calculating night info: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "status": "error",
+            "message": f"Error: {str(e)}"
+        }), 500
+
+
 if __name__ == '__main__':
+    # Load configuration from file
+    print("Loading configuration...")
+    load_config()
+    print(f"Configuration loaded: Capture interval = {capture_interval}s")
+    print(f"Location: lat={app_settings['latitude']}, lon={app_settings['longitude']}")
+
     # Start background capture automatically on startup
     start_background_capture()
-    
+
     app.run(host='0.0.0.0', port=5000, debug=False)
