@@ -35,6 +35,25 @@
                 </div>
             </div>
 
+            <!-- Deletion Controls -->
+            <div class="deletion-controls">
+                <div class="deletion-header">
+                    <h3>Delete Images</h3>
+                    <button id="toggleDeletionMode" class="secondary-button">Enable Deletion Mode</button>
+                </div>
+                <div id="deletionPanel" class="deletion-panel hidden">
+                    <div class="deletion-info">
+                        <p>Select days to delete (latest image will always be preserved)</p>
+                    </div>
+                    <div class="deletion-buttons">
+                        <button id="selectAllDays" class="button">Select All Days</button>
+                        <button id="deselectAllDays" class="button secondary-button">Deselect All</button>
+                        <button id="deleteSelected" class="button danger-button">Delete Selected</button>
+                    </div>
+                    <div id="deletionStatus" class="deletion-status"></div>
+                </div>
+            </div>
+
             {% if images %}
             <div class="gallery-by-day">
                 {% set day_groups = {} %}
@@ -50,9 +69,12 @@
 
                 <!-- Display each day as a collapsible section -->
                 {% for day, day_images in day_groups|dictsort(reverse=True) %}
-                <div class="day-section">
+                <div class="day-section" data-day="{{ day }}" data-image-count="{{ day_images|length }}">
                     <div class="day-header" onclick="toggleDaySection(this)">
-                        <h2>{{ day }} <span class="image-count">({{ day_images|length }} images)</span></h2>
+                        <div class="day-header-content">
+                            <input type="checkbox" class="day-checkbox" data-day="{{ day }}" onclick="event.stopPropagation()" style="display: none;">
+                            <h2>{{ day }} <span class="image-count">({{ day_images|length }} images)</span></h2>
+                        </div>
                         <span class="toggle-icon">▼</span>
                     </div>
 

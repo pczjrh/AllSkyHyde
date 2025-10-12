@@ -345,14 +345,14 @@ def api_stop_background():
 def api_set_interval():
     """Update the capture interval"""
     global capture_interval
-    
+
     try:
         new_interval = int(request.form.get('interval', 300))
         if new_interval < 30:
             return jsonify({"status": "error", "message": "Interval must be at least 30 seconds"})
-        
+
         capture_interval = new_interval
-        
+
         # If background capture is running, restart it with new interval
         if capture_thread and capture_thread.is_alive():
             stop_background_capture()
@@ -361,10 +361,88 @@ def api_set_interval():
             message = f"Capture interval updated to {capture_interval} seconds and restarted"
         else:
             message = f"Capture interval updated to {capture_interval} seconds"
-        
+
         return jsonify({"status": "success", "message": message})
     except ValueError:
         return jsonify({"status": "error", "message": "Invalid interval value"})
+
+
+@app.route('/api/delete_images', methods=['POST'])
+def api_delete_images():
+    """Delete images for selected days, preserving the latest image"""
+    try:
+        data = request.get_json(force=True)
+        if not data:
+            return jsonify({"status": "error", "message": "Invalid JSON data"}), 400
+
+        days_to_delete = data.get('days', [])
+
+        if not days_to_delete:
+            return jsonify({"status": "error", "message": "No days specified for deletion"}), 400
+
+        # Get all images
+        all_images = get_all_images()
+
+        if not all_images:
+            return jsonify({"status": "error", "message": "No images found"})
+
+        # Identify the latest image (first in the sorted list)
+        latest_image_filename = all_images[0]['filename']
+
+        # Collect images to delete
+        images_to_delete = []
+        deleted_days = []
+
+        for image in all_images:
+            # Skip the latest image
+            if image['filename'] == latest_image_filename:
+                continue
+
+            # Extract the day from the image timestamp
+            if image['timestamp']:
+                image_day = image['timestamp'].split(' ')[0]
+            else:
+                image_day = 'Unknown Date'
+
+            # If this image's day is in the deletion list, mark it for deletion
+            if image_day in days_to_delete:
+                images_to_delete.append(image)
+                if image_day not in deleted_days:
+                    deleted_days.append(image_day)
+
+        # Delete the images
+        deleted_count = 0
+        failed_deletions = []
+
+        for image in images_to_delete:
+            try:
+                if os.path.exists(image['path']):
+                    os.remove(image['path'])
+                    deleted_count += 1
+            except Exception as e:
+                failed_deletions.append(f"{image['filename']}: {str(e)}")
+
+        # Prepare response
+        if failed_deletions:
+            message = f"Deleted {deleted_count} images, but {len(failed_deletions)} failed: {', '.join(failed_deletions)}"
+            status = "partial"
+        else:
+            message = f"Successfully deleted {deleted_count} images from {len(deleted_days)} day(s)"
+            status = "success"
+
+        return jsonify({
+            "status": status,
+            "message": message,
+            "deleted_count": deleted_count,
+            "deleted_days": deleted_days,
+            "latest_image_preserved": latest_image_filename
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error deleting images: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
 
 
 @app.route('/system_status')
