@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>System Status - ZWO Camera</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .status-card {
+            background-color: #222;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            padding: 20px;
+        }
+        
+        .status-header {
+            border-bottom: 1px solid #eee;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+        }
+        
+        .status-header h2 {
+            margin: 0;
+            color: #fff;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .status-item {
+            margin-bottom: 15px;
+        }
+        
+        .status-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #fff;
+        }
+        
+        .status-value {
+            font-size: 1.2em;
+        }
+        
+        .progress-bar {
+            background-color: #e0e0e0;
+            border-radius: 4px;
+            height: 10px;
+            margin-top: 5px;
+            overflow: hidden;
+            width: 100%;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+        
+        .progress-low {
+            background-color: #4caf50;
+        }
+        
+        .progress-medium {
+            background-color: #ff9800;
+        }
+        
+        .progress-high {
+            background-color: #f44336;
+        }
+        
+        .refresh-button {
+            background-color: #4caf50;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 10px 20px;
+            margin-top: 20px;
+        }
+        
+        .refresh-button:hover {
+            background-color: #45a049;
+        }
+
+        /* Auto-refresh countdown */
+        .auto-refresh {
+            color: #777;
+            font-size: 0.9em;
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>ZWO Camera - System Status</h1>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('index') }}">Latest</a></li>
+                <li><a href="{{ url_for('gallery') }}">Gallery</a></li>
+                <li><a href="{{ url_for('control_panel') }}">Control Panel</a></li>
+                <li class="active"><a href="{{ url_for('system_status') }}">System Status</a></li>
+            </ul>
+        </nav>
+    </header>
+    
+    <main>
+        <div class="container">
+            <!-- Disk Usage Card -->
+            <div class="status-card">
+                <div class="status-header">
+                    <h2>Disk Usage</h2>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Available Space</div>
+                    <div class="status-value">{{ disk_free }} GB free of {{ disk_total }} GB</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill {% if disk_percent < 70 %}progress-low{% elif disk_percent < 90 %}progress-medium{% else %}progress-high{% endif %}" style="width: {{ disk_percent }}%"></div>
+                    </div>
+                    <div class="status-label" style="margin-top: 10px">Used: {{ disk_used }} GB ({{ "%.1f"|format(disk_percent) }}%)</div>
+                </div>
+            </div>
+            
+            <!-- CPU Status Card -->
+            <div class="status-card">
+                <div class="status-header">
+                    <h2>CPU Status</h2>
+                </div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-label">CPU Temperature</div>
+                        <div class="status-value">
+                            {% if cpu_temp is not none %}
+                                {{ "%.1f"|format(cpu_temp) }}°C
+                            {% else %}
+                                Not Available
+                            {% endif %}
+                        </div>
+                        {% if cpu_temp is not none %}
+                        <div class="progress-bar">
+                            {% set temp_percent = (cpu_temp / 100) * 100 %}
+                            <div class="progress-fill {% if cpu_temp < 60 %}progress-low{% elif cpu_temp < 80 %}progress-medium{% else %}progress-high{% endif %}" style="width: {{ temp_percent }}%"></div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="status-item">
+                        <div class="status-label">CPU Usage</div>
+                        <div class="status-value">{{ "%.1f"|format(cpu_usage) }}%</div>
+                        <div class="progress-bar">
+                            <div class="progress-fill {% if cpu_usage < 70 %}progress-low{% elif cpu_usage < 90 %}progress-medium{% else %}progress-high{% endif %}" style="width: {{ cpu_usage }}%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Memory Status Card -->
+            <div class="status-card">
+                <div class="status-header">
+                    <h2>Memory Status</h2>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Memory Usage</div>
+                    <div class="status-value">{{ memory_used }} GB used of {{ memory_total }} GB</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill {% if memory_percent < 70 %}progress-low{% elif memory_percent < 90 %}progress-medium{% else %}progress-high{% endif %}" style="width: {{ memory_percent }}%"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- System Information Card -->
+            <div class="status-card">
+                <div class="status-header">
+                    <h2>System Information</h2>
+                </div>
+                <div class="status-grid">
+                    <div>
+                        <div class="status-item">
+                            <div class="status-label">Platform</div>
+                            <div class="status-value">{{ system_info.platform }}</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-label">Hostname</div>
+                            <div class="status-value">{{ system_info.hostname }}</div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="status-item">
+                            <div class="status-label">Uptime</div>
+                            <div class="status-value">{{ uptime_days }} days, {{ uptime_hours }} hours, {{ uptime_minutes }} minutes</div>
+                        </div>
+                        <div class="status-item">
+                            <div class="status-label">Processor</div>
+                            <div class="status-value">{{ system_info.processor }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Image Storage Card -->
+            <div class="status-card">
+                <div class="status-header">
+                    <h2>Image Storage</h2>
+                </div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-label">Total Images</div>
+                        <div class="status-value">{{ image_count }}</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-label">Storage Used</div>
+                        <div class="status-value">{{ image_dir_size }} MB</div>
+                    </div>
+                </div>
+            </div>
+            
+            <button class="refresh-button" onclick="location.reload()">Refresh Status</button>
+            <div class="auto-refresh">
+                Page will refresh in <span id="countdown">60</span> seconds
+            </div>
+        </div>
+    </main>
+    
+    <footer>
+        <p>ZWO Camera Web Interface</p>
+    </footer>
+    
+    <script>
+        // Auto refresh countdown
+        let seconds = 60;
+        const countdownElement = document.getElementById('countdown');
+        
+        function updateCountdown() {
+            seconds--;
+            countdownElement.textContent = seconds;
+            
+            if (seconds <= 0) {
+                location.reload();
+            } else {
+                setTimeout(updateCountdown, 1000);
+            }
+        }
+        
+        setTimeout(updateCountdown, 1000);
+    </script>
+</body>
+</html>

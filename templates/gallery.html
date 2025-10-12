@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Image Gallery - ZWO Camera</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>ZWO Camera - Image Gallery</h1>
+                <nav>
+            <ul>
+                <li><a href="{{ url_for('index') }}">Latest</a></li>
+                <li><a href="{{ url_for('gallery') }}">Gallery</a></li>
+                <li><a href="{{ url_for('control_panel') }}">Control Panel</a></li>
+                <li><a href="{{ url_for('system_status') }}">System Status</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <div class="container">
+            <div class="gallery-controls">
+                <div class="search-filter">
+                    <input type="text" id="searchInput" placeholder="Search by filename...">
+                </div>
+                <div class="sort-filter">
+                    <label for="sortOption">Sort by:</label>
+                    <select id="sortOption">
+                        <option value="date-desc">Date (Newest First)</option>
+                        <option value="date-asc">Date (Oldest First)</option>
+                        <option value="exposure-desc">Exposure (Highest First)</option>
+                        <option value="exposure-asc">Exposure (Lowest First)</option>
+                    </select>
+                </div>
+            </div>
+
+            {% if images %}
+            <div class="gallery-by-day">
+                {% set day_groups = {} %}
+
+                <!-- Group images by day -->
+                {% for image in images %}
+                {% set image_day = image.timestamp.split(' ')[0] if image.timestamp else 'Unknown Date' %}
+                {% if image_day not in day_groups %}
+                {% set _ = day_groups.update({image_day: []}) %}
+                {% endif %}
+                {% set _ = day_groups[image_day].append(image) %}
+                {% endfor %}
+
+                <!-- Display each day as a collapsible section -->
+                {% for day, day_images in day_groups|dictsort(reverse=True) %}
+                <div class="day-section">
+                    <div class="day-header" onclick="toggleDaySection(this)">
+                        <h2>{{ day }} <span class="image-count">({{ day_images|length }} images)</span></h2>
+                        <span class="toggle-icon">▼</span>
+                    </div>
+
+                    <div class="day-content">
+                        <div class="gallery-grid">
+                            {% for image in day_images %}
+                            <div class="gallery-item" data-filename="{{ image.filename }}"
+                                 data-timestamp="{{ image.timestamp or '' }}"
+                                 data-exposure="{{ image.exposure_ms or '' }}">
+                                <a href="{{ url_for('image_detail', filename=image.filename) }}">
+                                    <div class="thumbnail">
+                                        <img src="{{ url_for('serve_image', filename=image.filename) }}" alt="{{ image.filename }}">
+                                    </div>
+                                    <div class="image-info">
+                                        <div class="filename">{{ image.filename }}</div>
+                                        {% if image.timestamp %}
+                                        <div class="capture-time">{{ image.timestamp.split(' ')[1] if ' ' in image.timestamp else '' }}</div>
+                                        {% endif %}
+                                        {% if image.exposure_ms %}
+                                        <div class="exposure">{{ image.exposure_ms }} ms</div>
+                                        {% endif %}
+                                    </div>
+                                </a>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="no-images">
+                <p>No images found in the directory.</p>
+                <a href="{{ url_for('control_panel') }}" class="button">Capture an Image</a>
+            </div>
+            {% endif %}
+        </div>
+    </main>
+
+    <footer>
+        <p>ZWO Camera Web Interface</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/gallery.js') }}"></script>
+</body>
+</html>

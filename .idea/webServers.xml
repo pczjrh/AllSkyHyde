@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="33ece523-6d75-4a2d-9b43-496c69a3bef4" name="kickpi@192.168.0.137:22 password">
+        <fileTransfer rootFolder="/home/kickpi/" accessType="SFTP" host="192.168.0.137" port="22" sshConfigId="e5881ecf-f8a9-4443-9f19-982ba83580e6" sshConfig="kickpi@192.168.0.137:22 password" />
+      </webServer>
+    </option>
+  </component>
+</project>

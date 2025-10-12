@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Control Panel - ZWO Camera</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .background-control {
+            background-color: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .status-badge.running {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        .status-badge.stopped {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .interval-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .interval-control label {
+            min-width: 150px;
+        }
+        
+        .interval-control input {
+            width: 100px;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>ZWO Camera - Control Panel</h1>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('index') }}">Latest</a></li>
+                <li><a href="{{ url_for('gallery') }}">Gallery</a></li>
+                <li><a href="{{ url_for('control_panel') }}">Control Panel</a></li>
+                <li><a href="{{ url_for('system_status') }}">System Status</a></li>
+            </ul>
+        </nav>
+    </header>
+    
+    <main>
+        <div class="container">
+            <div class="control-panel">
+                <!-- Background Capture Control -->
+                <div class="control-section background-control">
+                    <h2>
+                        Background Capture 
+                        <span class="status-badge" id="backgroundStatus">
+                            {% if background_running %}running{% else %}stopped{% endif %}
+                        </span>
+                    </h2>
+                    
+                    <div class="interval-control">
+                        <label for="captureIntervalInput">Capture Interval (seconds):</label>
+                        <input type="number" id="captureIntervalInput" min="30" value="{{ capture_interval }}">
+                        <button id="updateIntervalButton" class="secondary-button">Update Interval</button>
+                    </div>
+                    
+                    <div class="capture-buttons">
+                        <button id="startBackgroundButton" class="primary-button" 
+                                {% if background_running %}disabled{% endif %}>
+                            Start Background Capture
+                        </button>
+                        <button id="stopBackgroundButton" class="secondary-button" 
+                                {% if not background_running %}disabled{% endif %}>
+                            Stop Background Capture
+                        </button>
+                    </div>
+                    
+                    <p style="margin-top: 15px; color: #999; font-size: 0.9em;">
+                        Background capture automatically takes images at the specified interval. 
+                        Page refreshes will not trigger new captures.
+                    </p>
+                </div>
+                
+                <!-- Manual Capture Control -->
+                <div class="control-section">
+                    <h2>Manual Capture</h2>
+                    <div class="capture-controls">
+                        <div class="exposure-settings">
+                            <label for="exposureTime">Exposure Time (ms):</label>
+                            <input type="number" id="exposureTime" min="1" max="30000" value="1000">
+                        </div>
+                        
+                        <div class="capture-buttons">
+                            <button id="captureButton" class="primary-button" {% if is_capturing %}disabled{% endif %}>
+                                Capture Image Now
+                            </button>
+                            <button id="autoExposureButton" class="secondary-button" {% if is_capturing %}disabled{% endif %}>
+                                Auto Exposure
+                            </button>
+                        </div>
+                        
+                        <p style="margin-top: 10px; color: #999; font-size: 0.9em;">
+                            Manual capture takes a single image immediately, independent of background capture.
+                        </p>
+                    </div>
+                </div>
+                
+                <!-- Capture Status -->
+                <div class="control-section">
+                    <h2>Capture Status</h2>
+                    <div class="status-indicator" id="captureStatus">
+                        {% if is_capturing %}
+                        <div class="status capturing">Capture in progress...</div>
+                        {% else %}
+                        <div class="status idle">Idle - Ready to capture</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="log-container">
+                        <h3>Capture Log</h3>
+                        <div class="log-output" id="logOutput">
+                            {% for log_line in capture_log %}
+                                <div class="log-line">{{ log_line }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <footer>
+        <p>ZWO Camera Web Interface</p>
+    </footer>
+    
+    <script>
+        // Poll for status updates every 2 seconds
+        let statusInterval = setInterval(updateStatus, 2000);
+        
+        function updateStatus() {
+            fetch('/api/capture_status')
+                .then(response => response.json())
+                .then(data => {
+                    // Update capture status
+                    const statusDiv = document.getElementById('captureStatus');
+                    if (data.is_capturing) {
+                        statusDiv.innerHTML = '<div class="status capturing">Capture in progress...</div>';
+                        document.getElementById('captureButton').disabled = true;
+                        document.getElementById('autoExposureButton').disabled = true;
+                    } else {
+                        statusDiv.innerHTML = '<div class="status idle">Idle - Ready to capture</div>';
+                        document.getElementById('captureButton').disabled = false;
+                        document.getElementById('autoExposureButton').disabled = false;
+                    }
+                    
+                    // Update background status badge
+                    const badge = document.getElementById('backgroundStatus');
+                    if (data.background_running) {
+                        badge.textContent = 'running';
+                        badge.className = 'status-badge running';
+                        document.getElementById('startBackgroundButton').disabled = true;
+                        document.getElementById('stopBackgroundButton').disabled = false;
+                    } else {
+                        badge.textContent = 'stopped';
+                        badge.className = 'status-badge stopped';
+                        document.getElementById('startBackgroundButton').disabled = false;
+                        document.getElementById('stopBackgroundButton').disabled = true;
+                    }
+                    
+                    // Update log
+                    const logOutput = document.getElementById('logOutput');
+                    logOutput.innerHTML = '';
+                    data.log.forEach(line => {
+                        const div = document.createElement('div');
+                        div.className = 'log-line';
+                        div.textContent = line;
+                        logOutput.appendChild(div);
+                    });
+                    
+                    // Auto-scroll to bottom
+                    logOutput.scrollTop = logOutput.scrollHeight;
+                });
+        }
+        
+        // Manual capture button
+        document.getElementById('captureButton').addEventListener('click', function() {
+            const exposure = document.getElementById('exposureTime').value;
+            const formData = new FormData();
+            formData.append('exposure_ms', exposure);
+            
+            fetch('/api/capture', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                updateStatus();
+            });
+        });
+        
+        // Auto exposure button
+        document.getElementById('autoExposureButton').addEventListener('click', function() {
+            const formData = new FormData();
+            
+            fetch('/api/capture', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                updateStatus();
+            });
+        });
+        
+        // Start background capture
+        document.getElementById('startBackgroundButton').addEventListener('click', function() {
+            fetch('/api/background_capture/start', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                updateStatus();
+            });
+        });
+        
+        // Stop background capture
+        document.getElementById('stopBackgroundButton').addEventListener('click', function() {
+            fetch('/api/background_capture/stop', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                updateStatus();
+            });
+        });
+        
+        // Update interval
+        document.getElementById('updateIntervalButton').addEventListener('click', function() {
+            const interval = document.getElementById('captureIntervalInput').value;
+            const formData = new FormData();
+            formData.append('interval', interval);
+            
+            fetch('/api/capture_interval', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                updateStatus();
+            });
+        });
+        
+        // Initial status update
+        updateStatus();
+    </script>
+</body>
+</html>
