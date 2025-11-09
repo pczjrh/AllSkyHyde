@@ -12,13 +12,22 @@ import shutil
 import psutil
 import platform
 
+# Import requests for weather API - make it optional in case it's not installed
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    print("Warning: 'requests' module not found. Weather data will not be available.")
+    print("Install with: pip install requests")
+
 app = Flask(__name__)
 
 # Configure this to match your output directory
 # Note: These paths will be automatically updated by install.sh during installation
 IMAGE_DIR = os.path.expanduser("~/allsky_images")
 SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image_capture.py")
-CONFIG_FILE = "app_config.json"  # Configuration file for persistent settings
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_config.json")  # Configuration file for persistent settings
 
 # Global variables to track capture process
 capture_interval = 300  # Default 5 minutes
@@ -27,6 +36,7 @@ capture_log = []
 capture_thread = None
 stop_capture_flag = False
 last_capture_time = None
+background_capture_enabled = False  # Track if background capture should be running
 
 # Global settings storage
 app_settings = {
@@ -40,7 +50,7 @@ app_settings = {
 
 def load_config():
     """Load configuration from JSON file"""
-    global app_settings, capture_interval, IMAGE_DIR, SCRIPT_PATH
+    global app_settings, capture_interval, IMAGE_DIR, SCRIPT_PATH, background_capture_enabled
 
     try:
         if os.path.exists(CONFIG_FILE):
@@ -55,28 +65,39 @@ def load_config():
                 if 'capture_interval' in config:
                     capture_interval = config['capture_interval']
 
+                # Load background capture status
+                if 'background_capture_enabled' in config:
+                    background_capture_enabled = config['background_capture_enabled']
+
                 # Load paths (optional, can be overridden)
                 if 'image_dir' in config:
                     IMAGE_DIR = config['image_dir']
                 if 'script_path' in config:
                     SCRIPT_PATH = config['script_path']
 
-                app.logger.info(f"Configuration loaded from {CONFIG_FILE}")
+                print(f"Configuration loaded from {CONFIG_FILE}")
+                print(f"Settings: lat={app_settings.get('latitude')}, lon={app_settings.get('longitude')}, api_key={'set' if app_settings.get('openweather_api_key') else 'not set'}")
                 return True
+        else:
+            print(f"Configuration file not found: {CONFIG_FILE}")
+            print("Using default settings")
     except Exception as e:
-        app.logger.error(f"Error loading configuration: {str(e)}")
+        print(f"Error loading configuration: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
     return False
 
 
 def save_config():
     """Save configuration to JSON file"""
-    global app_settings, capture_interval, IMAGE_DIR, SCRIPT_PATH
+    global app_settings, capture_interval, IMAGE_DIR, SCRIPT_PATH, background_capture_enabled
 
     try:
         config = {
             "settings": app_settings,
             "capture_interval": capture_interval,
+            "background_capture_enabled": background_capture_enabled,
             "image_dir": IMAGE_DIR,
             "script_path": SCRIPT_PATH,
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -85,10 +106,13 @@ def save_config():
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=4)
 
-        app.logger.info(f"Configuration saved to {CONFIG_FILE}")
+        print(f"Configuration saved to {CONFIG_FILE}")
+        print(f"Settings: lat={app_settings.get('latitude')}, lon={app_settings.get('longitude')}, api_key={'set' if app_settings.get('openweather_api_key') else 'not set'}")
         return True
     except Exception as e:
-        app.logger.error(f"Error saving configuration: {str(e)}")
+        print(f"Error saving configuration to {CONFIG_FILE}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -214,31 +238,42 @@ def background_capture_loop():
 
 def start_background_capture():
     """Start the background capture thread"""
-    global capture_thread, stop_capture_flag
-    
+    global capture_thread, stop_capture_flag, background_capture_enabled
+
     if capture_thread and capture_thread.is_alive():
         return False, "Background capture already running"
-    
+
     stop_capture_flag = False
+    background_capture_enabled = True
     capture_thread = threading.Thread(target=background_capture_loop, daemon=True)
     capture_thread.start()
-    
+
+    # Save the status to config
+    save_config()
+
     return True, "Background capture started"
 
 
 def stop_background_capture():
     """Stop the background capture thread"""
-    global stop_capture_flag, capture_thread
-    
+    global stop_capture_flag, capture_thread, background_capture_enabled
+
     if not capture_thread or not capture_thread.is_alive():
+        # Even if not running, update the flag and save
+        background_capture_enabled = False
+        save_config()
         return False, "Background capture not running"
-    
+
     stop_capture_flag = True
+    background_capture_enabled = False
     capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Stopping background capture...")
-    
+
     # Wait for thread to finish (with timeout)
     capture_thread.join(timeout=5)
-    
+
+    # Save the status to config
+    save_config()
+
     return True, "Background capture stopped"
 
 
@@ -263,7 +298,7 @@ def index():
                            latest_image=latest_image,
                            capture_interval=capture_interval,
                            last_capture_timestamp=last_capture_timestamp,
-                           background_running=capture_thread and capture_thread.is_alive())
+                           background_running=background_capture_enabled)
 
 
 @app.route('/api/last_capture_time')
@@ -332,7 +367,7 @@ def control_panel():
     return render_template('control.html',
                            is_capturing=is_capturing,
                            capture_log=capture_log,
-                           background_running=capture_thread and capture_thread.is_alive(),
+                           background_running=background_capture_enabled,
                            capture_interval=capture_interval)
 
 
@@ -385,10 +420,14 @@ def api_capture():
 @app.route('/api/capture_status')
 def api_capture_status():
     """API endpoint to get the current capture status"""
+    global background_capture_enabled
+
+    # Use the persistent flag instead of just thread status
+    # This ensures status is consistent even across restarts
     return jsonify({
         "is_capturing": is_capturing,
         "log": capture_log,
-        "background_running": capture_thread and capture_thread.is_alive(),
+        "background_running": background_capture_enabled,
         "capture_interval": capture_interval
     })
 
@@ -410,7 +449,7 @@ def api_stop_background():
 @app.route('/api/capture_interval', methods=['POST'])
 def api_set_interval():
     """Update the capture interval"""
-    global capture_interval
+    global capture_interval, background_capture_enabled
 
     try:
         new_interval = int(request.form.get('interval', 300))
@@ -422,8 +461,8 @@ def api_set_interval():
         # Save configuration to file
         save_config()
 
-        # If background capture is running, restart it with new interval
-        if capture_thread and capture_thread.is_alive():
+        # If background capture is enabled, restart it with new interval
+        if background_capture_enabled:
             stop_background_capture()
             time.sleep(1)
             start_background_capture()
@@ -1003,81 +1042,89 @@ def api_night_info():
             "wind_gust": None
         }
 
-        if app_settings.get('openweather_api_key'):
+        if REQUESTS_AVAILABLE and app_settings.get('openweather_api_key') and app_settings['openweather_api_key'].strip():
             try:
-                import requests
                 api_key = app_settings['openweather_api_key']
 
                 # Strip any whitespace from API key
                 api_key = api_key.strip() if isinstance(api_key, str) else api_key
 
-                weather_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
-
-                app.logger.info(f"Fetching weather data from OpenWeather API for lat={lat}, lon={lon}")
-
-                response = requests.get(weather_url, timeout=10)
-
-                app.logger.info(f"OpenWeather API response status: {response.status_code}")
-
-                if response.status_code == 200:
-                    weather_json = response.json()
-
-                    app.logger.info(f"Weather data received: {weather_json.get('weather', [{}])[0].get('description', 'Unknown')}")
-
-                    # Extract weather information
-                    weather_data["description"] = weather_json.get("weather", [{}])[0].get("description", "Unknown").capitalize()
-                    weather_data["temperature"] = weather_json.get("main", {}).get("temp")
-                    weather_data["humidity"] = weather_json.get("main", {}).get("humidity")
-                    weather_data["pressure"] = weather_json.get("main", {}).get("pressure")
-                    weather_data["clouds"] = weather_json.get("clouds", {}).get("all")  # Cloud coverage percentage
-
-                    # Rain data (if available)
-                    if "rain" in weather_json:
-                        weather_data["rain"] = weather_json["rain"].get("1h", 0)  # Rain volume for last hour
-                    else:
-                        weather_data["rain"] = 0
-
-                    # Wind data
-                    weather_data["wind_speed"] = weather_json.get("wind", {}).get("speed")
-                    weather_data["wind_gust"] = weather_json.get("wind", {}).get("gust")
-
-                    # Map OpenWeather icon codes to emoji
-                    weather_code = weather_json.get("weather", [{}])[0].get("icon", "01d")
-                    icon_map = {
-                        "01d": "☀️", "01n": "🌙",  # Clear sky
-                        "02d": "🌤", "02n": "🌤",  # Few clouds
-                        "03d": "☁️", "03n": "☁️",  # Scattered clouds
-                        "04d": "☁️", "04n": "☁️",  # Broken clouds
-                        "09d": "🌧", "09n": "🌧",  # Shower rain
-                        "10d": "🌦", "10n": "🌦",  # Rain
-                        "11d": "⛈", "11n": "⛈",   # Thunderstorm
-                        "13d": "🌨", "13n": "🌨",  # Snow
-                        "50d": "🌫", "50n": "🌫"   # Mist
-                    }
-                    weather_data["icon"] = icon_map.get(weather_code, "🌤")
+                # Check if API key is empty after stripping
+                if not api_key:
+                    print("OpenWeather API key is empty after stripping whitespace")
+                    weather_data["description"] = "No API key"
                 else:
-                    error_msg = f"OpenWeather API error: {response.status_code}"
-                    try:
-                        error_data = response.json()
-                        error_msg += f" - {error_data.get('message', 'Unknown error')}"
-                    except:
-                        error_msg += f" - {response.text[:200]}"
-                    app.logger.error(error_msg)
-                    weather_data["description"] = "API Error"
+                    weather_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+
+                    print(f"Fetching weather data from OpenWeather API for lat={lat}, lon={lon}")
+
+                    response = requests.get(weather_url, timeout=10)
+
+                    print(f"OpenWeather API response status: {response.status_code}")
+
+                    if response.status_code == 200:
+                        weather_json = response.json()
+
+                        print(f"Weather data received: {weather_json.get('weather', [{}])[0].get('description', 'Unknown')}")
+
+                        # Extract weather information
+                        weather_data["description"] = weather_json.get("weather", [{}])[0].get("description", "Unknown").capitalize()
+                        weather_data["temperature"] = weather_json.get("main", {}).get("temp")
+                        weather_data["humidity"] = weather_json.get("main", {}).get("humidity")
+                        weather_data["pressure"] = weather_json.get("main", {}).get("pressure")
+                        weather_data["clouds"] = weather_json.get("clouds", {}).get("all")  # Cloud coverage percentage
+
+                        # Rain data (if available)
+                        if "rain" in weather_json:
+                            weather_data["rain"] = weather_json["rain"].get("1h", 0)  # Rain volume for last hour
+                        else:
+                            weather_data["rain"] = 0
+
+                        # Wind data
+                        weather_data["wind_speed"] = weather_json.get("wind", {}).get("speed")
+                        weather_data["wind_gust"] = weather_json.get("wind", {}).get("gust")
+
+                        # Map OpenWeather icon codes to emoji
+                        weather_code = weather_json.get("weather", [{}])[0].get("icon", "01d")
+                        icon_map = {
+                            "01d": "☀️", "01n": "🌙",  # Clear sky
+                            "02d": "🌤", "02n": "🌤",  # Few clouds
+                            "03d": "☁️", "03n": "☁️",  # Scattered clouds
+                            "04d": "☁️", "04n": "☁️",  # Broken clouds
+                            "09d": "🌧", "09n": "🌧",  # Shower rain
+                            "10d": "🌦", "10n": "🌦",  # Rain
+                            "11d": "⛈", "11n": "⛈",   # Thunderstorm
+                            "13d": "🌨", "13n": "🌨",  # Snow
+                            "50d": "🌫", "50n": "🌫"   # Mist
+                        }
+                        weather_data["icon"] = icon_map.get(weather_code, "🌤")
+                    else:
+                        error_msg = f"OpenWeather API error: {response.status_code}"
+                        try:
+                            error_data = response.json()
+                            error_msg += f" - {error_data.get('message', 'Unknown error')}"
+                        except:
+                            error_msg += f" - {response.text[:200]}"
+                        print(error_msg)
+                        weather_data["description"] = f"API Error ({response.status_code})"
 
             except requests.exceptions.Timeout:
-                app.logger.error("OpenWeather API request timed out")
+                print("OpenWeather API request timed out")
                 weather_data["description"] = "Request timeout"
             except requests.exceptions.RequestException as e:
-                app.logger.error(f"OpenWeather API request failed: {str(e)}")
-                weather_data["description"] = "Request failed"
+                print(f"OpenWeather API request failed: {str(e)}")
+                weather_data["description"] = "Connection error"
             except Exception as e:
-                app.logger.error(f"Error fetching weather data: {str(e)}")
+                print(f"Error fetching weather data: {str(e)}")
                 import traceback
                 traceback.print_exc()
-                weather_data["description"] = "Error"
+                weather_data["description"] = "Error fetching data"
+        elif not REQUESTS_AVAILABLE:
+            print("Requests module not available - cannot fetch weather data")
+            weather_data["description"] = "Requests module not installed"
         else:
-            app.logger.info("No OpenWeather API key configured")
+            print("No OpenWeather API key configured")
+            weather_data["description"] = "No API key configured"
 
         return jsonify({
             "status": "success",
@@ -1117,7 +1164,11 @@ if __name__ == '__main__':
     print(f"Configuration loaded: Capture interval = {capture_interval}s")
     print(f"Location: lat={app_settings['latitude']}, lon={app_settings['longitude']}")
 
-    # Start background capture automatically on startup
-    start_background_capture()
+    # Start background capture automatically on startup if it was enabled before
+    if background_capture_enabled:
+        print("Background capture was enabled, restarting...")
+        start_background_capture()
+    else:
+        print("Background capture is disabled")
 
     app.run(host='0.0.0.0', port=5000, debug=False)

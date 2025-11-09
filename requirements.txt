@@ -1,0 +1,7 @@
+Flask
+zwoasi
+numpy
+Pillow
+psutil
+requests
+gunicorn
