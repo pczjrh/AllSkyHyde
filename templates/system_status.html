@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>System Status - ZWO Camera</title>
+    <title>System Status - HydeHome-AllSky</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
@@ -70,19 +70,101 @@
             background-color: #f44336;
         }
         
-        .refresh-button {
-            background-color: #4caf50;
+        .refresh-button, .restart-button, .shutdown-button {
             border: none;
             border-radius: 4px;
             color: white;
             cursor: pointer;
             font-size: 16px;
             padding: 10px 20px;
-            margin-top: 20px;
         }
-        
+
+        .refresh-button {
+            background-color: #4caf50;
+        }
+
         .refresh-button:hover {
             background-color: #45a049;
+        }
+
+        .restart-button {
+            background-color: #ff9800;
+        }
+
+        .restart-button:hover {
+            background-color: #e68900;
+        }
+
+        .shutdown-button {
+            background-color: #f44336;
+        }
+
+        .shutdown-button:hover {
+            background-color: #da190b;
+        }
+
+        /* Confirmation dialog styles */
+        .confirmation-dialog {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .confirmation-content {
+            background-color: #2a2a2a;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 400px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .confirmation-content h3 {
+            margin-top: 0;
+            color: #fff;
+        }
+
+        .confirmation-content p {
+            color: #ccc;
+            margin: 15px 0;
+        }
+
+        .confirmation-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .confirm-btn, .cancel-btn {
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 8px 16px;
+        }
+
+        .confirm-btn {
+            background-color: #f44336;
+        }
+
+        .confirm-btn:hover {
+            background-color: #da190b;
+        }
+
+        .cancel-btn {
+            background-color: #666;
+        }
+
+        .cancel-btn:hover {
+            background-color: #555;
         }
 
         /* Auto-refresh countdown */
@@ -96,7 +178,7 @@
 </head>
 <body>
     <header>
-        <h1>ZWO Camera - System Status</h1>
+        <h1>HydeHome-AllSky - System Status</h1>
         <nav>
             <ul>
                 <li><a href="{{ url_for('index') }}">Latest</a></li>
@@ -216,7 +298,11 @@
                 </div>
             </div>
             
-            <button class="refresh-button" onclick="location.reload()">Refresh Status</button>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px;">
+                <button class="refresh-button" onclick="location.reload()">Refresh Status</button>
+                <button class="restart-button" onclick="confirmRestart()">Restart System</button>
+                <button class="shutdown-button" onclick="confirmShutdown()">Shutdown System</button>
+            </div>
             <div class="auto-refresh">
                 Page will refresh in <span id="countdown">60</span> seconds
             </div>
@@ -224,26 +310,119 @@
     </main>
     
     <footer>
-        <p>ZWO Camera Web Interface</p>
+        <p>HydeHome-AllSky Web Interface</p>
     </footer>
-    
+
+    <!-- Confirmation Dialogs -->
+    <div id="restartDialog" class="confirmation-dialog">
+        <div class="confirmation-content">
+            <h3>Confirm System Restart</h3>
+            <p>Are you sure you want to restart the system?</p>
+            <p>All running processes will be stopped and the system will reboot.</p>
+            <div class="confirmation-buttons">
+                <button class="cancel-btn" onclick="closeDialog('restartDialog')">Cancel</button>
+                <button class="confirm-btn" onclick="executeRestart()">Restart</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="shutdownDialog" class="confirmation-dialog">
+        <div class="confirmation-content">
+            <h3>Confirm System Shutdown</h3>
+            <p>Are you sure you want to shutdown the system?</p>
+            <p>All running processes will be stopped and the system will power off.</p>
+            <div class="confirmation-buttons">
+                <button class="cancel-btn" onclick="closeDialog('shutdownDialog')">Cancel</button>
+                <button class="confirm-btn" onclick="executeShutdown()">Shutdown</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Auto refresh countdown
         let seconds = 60;
         const countdownElement = document.getElementById('countdown');
-        
+
         function updateCountdown() {
             seconds--;
             countdownElement.textContent = seconds;
-            
+
             if (seconds <= 0) {
                 location.reload();
             } else {
                 setTimeout(updateCountdown, 1000);
             }
         }
-        
+
         setTimeout(updateCountdown, 1000);
+
+        // Confirmation dialog functions
+        function confirmRestart() {
+            document.getElementById('restartDialog').style.display = 'flex';
+        }
+
+        function confirmShutdown() {
+            document.getElementById('shutdownDialog').style.display = 'flex';
+        }
+
+        function closeDialog(dialogId) {
+            document.getElementById(dialogId).style.display = 'none';
+        }
+
+        function executeRestart() {
+            fetch('/api/system/restart', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('System restart initiated. The system will reboot shortly.');
+                    closeDialog('restartDialog');
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('Error initiating restart: ' + error);
+            });
+        }
+
+        function executeShutdown() {
+            fetch('/api/system/shutdown', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('System shutdown initiated. The system will power off shortly.');
+                    closeDialog('shutdownDialog');
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('Error initiating shutdown: ' + error);
+            });
+        }
+
+        // Close dialog when clicking outside the content
+        document.getElementById('restartDialog').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeDialog('restartDialog');
+            }
+        });
+
+        document.getElementById('shutdownDialog').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeDialog('shutdownDialog');
+            }
+        });
     </script>
 </body>
 </html>

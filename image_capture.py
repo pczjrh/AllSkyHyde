@@ -243,33 +243,11 @@ def capture_final_image(camera, camera_info, output_dir, exposure_time_ms, image
 
     # Generate filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"zwo_optimal_{timestamp}_exp{exposure_time_ms:.0f}ms.png"
+    filename = f"{timestamp}_exp{exposure_time_ms:.0f}ms.png"
     filepath = os.path.join(output_dir, filename)
 
     # Save image
     img = Image.fromarray(img_array)
-
-    # Add timestamp to the bottom left corner in white
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Convert to RGB mode if it's not already
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-
-    draw = ImageDraw.Draw(img)
-
-    # Try to use a default font
-    try:
-        # Try to get a font - adjust size as needed
-        font = ImageFont.truetype("arial.ttf", 24)  # Adjust size as needed
-    except IOError:
-        # Use default font if custom font not available
-        font = ImageFont.load_default()
-
-    # Draw the text in white at the bottom left
-    draw.text((10, img.height - 40), current_time, fill=(255, 255, 255), font=font)
-
-    # Save the modified image
     img.save(filepath)
 
     width, height = img_array.shape[1], img_array.shape[0]

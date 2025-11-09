@@ -19,14 +19,14 @@ RUN_CONTINUOUSLY = True  # Set to True for infinite loop
 def run_capture():
     """Run a single capture cycle"""
     import subprocess
-    
+
     # Run the main capture script
     result = subprocess.run(
-        ['python3', 'test5.py'],
+        ['python3', 'image_capture.py'],
         capture_output=False,
         text=True
     )
-    
+
     return result.returncode == 0
 
 

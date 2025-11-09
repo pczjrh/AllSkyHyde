@@ -15,8 +15,9 @@ import platform
 app = Flask(__name__)
 
 # Configure this to match your output directory
-IMAGE_DIR = "/home/kickpi/zwo_images/zwo_images"
-SCRIPT_PATH = "/home/kickpi/zwo_images/test5.py"  # Path to your capture script
+# Note: These paths will be automatically updated by install.sh during installation
+IMAGE_DIR = os.path.expanduser("~/allsky_images")
+SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image_capture.py")
 CONFIG_FILE = "app_config.json"  # Configuration file for persistent settings
 
 # Global variables to track capture process
@@ -98,7 +99,7 @@ def extract_metadata_from_filename(filename):
         "exposure_ms": None
     }
 
-    # Extract timestamp (format: zwo_optimal_YYYYMMDD_HHMMSS_expXXXms.png)
+    # Extract timestamp (format: YYYYMMDD_HHMMSS_expXXXms.png)
     timestamp_match = re.search(r'(\d{8}_\d{6})', filename)
     if timestamp_match:
         timestamp_str = timestamp_match.group(1)
@@ -118,7 +119,8 @@ def extract_metadata_from_filename(filename):
 
 def get_all_images():
     """Get all ZWO images with metadata, sorted by date (newest first)"""
-    image_pattern = os.path.join(IMAGE_DIR, "zwo_optimal_*.png")
+    # Match files with pattern: YYYYMMDD_HHMMSS_expXXXms.png
+    image_pattern = os.path.join(IMAGE_DIR, "*_exp*ms.png")
     image_files = glob.glob(image_pattern)
 
     images = []
@@ -567,6 +569,54 @@ def system_status():
                            system_info=system_info,
                            image_dir_size=image_dir_size,
                            image_count=image_count)
+
+
+@app.route('/api/system/restart', methods=['POST'])
+def system_restart():
+    """Restart the system."""
+    try:
+        app.logger.info("System restart requested")
+
+        # Stop background capture before restart
+        global stop_capture_flag
+        stop_capture_flag.set()
+
+        # Platform-specific restart commands
+        if platform.system() == "Linux":
+            subprocess.Popen(["sudo", "reboot"])
+        elif platform.system() == "Windows":
+            subprocess.Popen(["shutdown", "/r", "/t", "5"])
+        else:
+            return jsonify({"status": "error", "message": "Unsupported platform"}), 400
+
+        return jsonify({"status": "success", "message": "System restart initiated"})
+    except Exception as e:
+        app.logger.error(f"Error restarting system: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/system/shutdown', methods=['POST'])
+def system_shutdown():
+    """Shutdown the system."""
+    try:
+        app.logger.info("System shutdown requested")
+
+        # Stop background capture before shutdown
+        global stop_capture_flag
+        stop_capture_flag.set()
+
+        # Platform-specific shutdown commands
+        if platform.system() == "Linux":
+            subprocess.Popen(["sudo", "poweroff"])
+        elif platform.system() == "Windows":
+            subprocess.Popen(["shutdown", "/s", "/t", "5"])
+        else:
+            return jsonify({"status": "error", "message": "Unsupported platform"}), 400
+
+        return jsonify({"status": "success", "message": "System shutdown initiated"})
+    except Exception as e:
+        app.logger.error(f"Error shutting down system: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 def get_cpu_temperature():
