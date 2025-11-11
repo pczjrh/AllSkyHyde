@@ -78,21 +78,34 @@
                         <input type="number" id="captureIntervalInput" min="30" value="{{ capture_interval }}">
                         <button id="updateIntervalButton" class="secondary-button">Update Interval</button>
                     </div>
-                    
+
+                    <div class="interval-control">
+                        <label for="minExposureInput">Min Exposure (ms):</label>
+                        <input type="number" id="minExposureInput" min="1" max="30000" value="1">
+                        <span class="setting-hint">1-30000 ms</span>
+                    </div>
+
+                    <div class="interval-control">
+                        <label for="maxExposureInput">Max Exposure (ms):</label>
+                        <input type="number" id="maxExposureInput" min="100" max="30000" value="30000">
+                        <span class="setting-hint">100-30000 ms</span>
+                    </div>
+
                     <div class="capture-buttons">
-                        <button id="startBackgroundButton" class="primary-button" 
+                        <button id="startBackgroundButton" class="primary-button"
                                 {% if background_running %}disabled{% endif %}>
                             Start Background Capture
                         </button>
-                        <button id="stopBackgroundButton" class="secondary-button" 
+                        <button id="stopBackgroundButton" class="secondary-button"
                                 {% if not background_running %}disabled{% endif %}>
                             Stop Background Capture
                         </button>
                     </div>
-                    
+
                     <p style="margin-top: 15px; color: #999; font-size: 0.9em;">
-                        Background capture automatically takes images at the specified interval. 
-                        Page refreshes will not trigger new captures.
+                        Background capture automatically takes images at the specified interval.
+                        Page refreshes will not trigger new captures. Min/max exposure settings control
+                        the auto-exposure algorithm range.
                     </p>
                 </div>
                 
@@ -138,6 +151,9 @@
                                 <div class="log-line">{{ log_line }}</div>
                             {% endfor %}
                         </div>
+                        <button id="downloadLogsButton" class="secondary-button" style="margin-top: 10px;">
+                            Download Logs
+                        </button>
                     </div>
                 </div>
                 </div>
@@ -359,24 +375,49 @@
         // Initial status update
         updateStatus();
 
+        // Download logs button
+        document.getElementById('downloadLogsButton').addEventListener('click', function() {
+            window.location.href = '/api/download_logs';
+        });
+
         // Settings Management
         let settingsLoaded = false;
 
         function loadSettings() {
+            // Don't reload if already loaded
+            if (settingsLoaded) {
+                return;
+            }
+
             fetch('/api/settings')
                 .then(response => response.json())
                 .then(data => {
-                    // Only load settings if they haven't been loaded yet or if explicitly requested
-                    if (!settingsLoaded) {
-                        if (data.latitude !== null && data.latitude !== undefined) document.getElementById('latitude').value = data.latitude;
-                        if (data.longitude !== null && data.longitude !== undefined) document.getElementById('longitude').value = data.longitude;
-                        if (data.timezone !== null && data.timezone !== undefined) document.getElementById('timezone').value = data.timezone;
-                        document.getElementById('dstEnabled').checked = data.dst_enabled || false;
-                        if (data.openweather_api_key !== null && data.openweather_api_key !== undefined && data.openweather_api_key !== '') {
-                            document.getElementById('openweatherApiKey').value = data.openweather_api_key;
-                        }
-                        settingsLoaded = true;
+                    console.log('Settings loaded:', data);
+
+                    // Set values if they exist
+                    if (data.latitude !== null && data.latitude !== undefined) {
+                        document.getElementById('latitude').value = data.latitude;
                     }
+                    if (data.longitude !== null && data.longitude !== undefined) {
+                        document.getElementById('longitude').value = data.longitude;
+                    }
+                    if (data.timezone !== null && data.timezone !== undefined) {
+                        document.getElementById('timezone').value = data.timezone;
+                    }
+                    document.getElementById('dstEnabled').checked = data.dst_enabled || false;
+                    if (data.openweather_api_key !== null && data.openweather_api_key !== undefined && data.openweather_api_key !== '') {
+                        document.getElementById('openweatherApiKey').value = data.openweather_api_key;
+                    }
+
+                    // Load exposure settings
+                    if (data.min_exposure_ms !== null && data.min_exposure_ms !== undefined) {
+                        document.getElementById('minExposureInput').value = data.min_exposure_ms;
+                    }
+                    if (data.max_exposure_ms !== null && data.max_exposure_ms !== undefined) {
+                        document.getElementById('maxExposureInput').value = data.max_exposure_ms;
+                    }
+
+                    settingsLoaded = true;
 
                     // Update solar info if location is set
                     if (data.latitude !== null && data.longitude !== null) {
@@ -394,13 +435,17 @@
             const timezone = document.getElementById('timezone').value;
             const dstEnabled = document.getElementById('dstEnabled').checked;
             const openweatherApiKey = document.getElementById('openweatherApiKey').value;
+            const minExposure = document.getElementById('minExposureInput').value;
+            const maxExposure = document.getElementById('maxExposureInput').value;
 
             const settings = {
                 latitude: latitude ? parseFloat(latitude) : null,
                 longitude: longitude ? parseFloat(longitude) : null,
                 timezone: timezone ? parseFloat(timezone) : null,
                 dst_enabled: dstEnabled,
-                openweather_api_key: openweatherApiKey || null
+                openweather_api_key: openweatherApiKey || null,
+                min_exposure_ms: minExposure ? parseInt(minExposure) : 1,
+                max_exposure_ms: maxExposure ? parseInt(maxExposure) : 30000
             };
 
             fetch('/api/settings', {

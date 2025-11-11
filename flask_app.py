@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, render_template, send_from_directory, jsonify, request, redirect, url_for
+from flask import Flask, render_template, send_from_directory, jsonify, request, redirect, url_for, Response
 import os
 import glob
 import re
@@ -44,8 +44,12 @@ app_settings = {
     "longitude": None,
     "timezone": None,
     "dst_enabled": False,
-    "openweather_api_key": None
+    "openweather_api_key": None,
+    "min_exposure_ms": 1,
+    "max_exposure_ms": 30000
 }
+
+# NOTE: Configuration loading moved to after function definitions to avoid import errors
 
 
 def load_config():
@@ -69,6 +73,12 @@ def load_config():
                 if 'background_capture_enabled' in config:
                     background_capture_enabled = config['background_capture_enabled']
 
+                # Load exposure limits (with fallback to top-level config for backward compatibility)
+                if 'min_exposure_ms' in config:
+                    app_settings['min_exposure_ms'] = config['min_exposure_ms']
+                if 'max_exposure_ms' in config:
+                    app_settings['max_exposure_ms'] = config['max_exposure_ms']
+
                 # Load paths (optional, can be overridden)
                 if 'image_dir' in config:
                     IMAGE_DIR = config['image_dir']
@@ -77,6 +87,7 @@ def load_config():
 
                 print(f"Configuration loaded from {CONFIG_FILE}")
                 print(f"Settings: lat={app_settings.get('latitude')}, lon={app_settings.get('longitude')}, api_key={'set' if app_settings.get('openweather_api_key') else 'not set'}")
+                print(f"Exposure limits: min={app_settings.get('min_exposure_ms')}ms, max={app_settings.get('max_exposure_ms')}ms")
                 return True
         else:
             print(f"Configuration file not found: {CONFIG_FILE}")
@@ -100,6 +111,8 @@ def save_config():
             "background_capture_enabled": background_capture_enabled,
             "image_dir": IMAGE_DIR,
             "script_path": SCRIPT_PATH,
+            "min_exposure_ms": app_settings.get("min_exposure_ms", 1),
+            "max_exposure_ms": app_settings.get("max_exposure_ms", 30000),
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
@@ -108,6 +121,7 @@ def save_config():
 
         print(f"Configuration saved to {CONFIG_FILE}")
         print(f"Settings: lat={app_settings.get('latitude')}, lon={app_settings.get('longitude')}, api_key={'set' if app_settings.get('openweather_api_key') else 'not set'}")
+        print(f"Exposure limits: min={app_settings.get('min_exposure_ms')}ms, max={app_settings.get('max_exposure_ms')}ms")
         return True
     except Exception as e:
         print(f"Error saving configuration to {CONFIG_FILE}: {str(e)}")
@@ -210,29 +224,35 @@ def run_single_capture(exposure_ms=None):
 
 def background_capture_loop():
     """Background thread that captures images at regular intervals"""
-    global is_capturing, stop_capture_flag, capture_log, last_capture_time
-    
+    global is_capturing, stop_capture_flag, capture_log, last_capture_time, background_capture_enabled
+
     capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Background capture started (interval: {capture_interval}s)")
-    
-    while not stop_capture_flag:
-        is_capturing = True
-        
-        # Run capture
-        success = run_single_capture()
-        
-        is_capturing = False
-        
-        if success:
-            capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting {capture_interval} seconds until next capture...")
-        else:
-            capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Capture failed, will retry in {capture_interval} seconds...")
-        
-        # Wait for the interval (check stop flag every second)
-        for _ in range(capture_interval):
-            if stop_capture_flag:
-                break
-            time.sleep(1)
-    
+
+    try:
+        while not stop_capture_flag:
+            is_capturing = True
+
+            # Run capture
+            success = run_single_capture()
+
+            is_capturing = False
+
+            if success:
+                capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting {capture_interval} seconds until next capture...")
+            else:
+                capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Capture failed, will retry in {capture_interval} seconds...")
+
+            # Wait for the interval (check stop flag every second)
+            for _ in range(capture_interval):
+                if stop_capture_flag:
+                    break
+                time.sleep(1)
+    except Exception as e:
+        capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Background capture error: {str(e)}")
+        # Don't change the flag - let the user control the intent via Start/Stop buttons
+        # The flag represents USER INTENT, not thread state
+        # (Removed auto-correction that was causing flicker)
+
     capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Background capture stopped")
 
 
@@ -420,16 +440,42 @@ def api_capture():
 @app.route('/api/capture_status')
 def api_capture_status():
     """API endpoint to get the current capture status"""
-    global background_capture_enabled
+    global background_capture_enabled, capture_thread
 
-    # Use the persistent flag instead of just thread status
-    # This ensures status is consistent even across restarts
+    # Return the status based on the persistent flag
+    # The flag represents the USER'S INTENT, not the thread state
+    # If the thread crashes, the flag stays true so we can restart it
     return jsonify({
         "is_capturing": is_capturing,
         "log": capture_log,
         "background_running": background_capture_enabled,
-        "capture_interval": capture_interval
+        "capture_interval": capture_interval,
+        "thread_alive": capture_thread and capture_thread.is_alive()  # For debugging
     })
+
+
+@app.route('/api/download_logs')
+def api_download_logs():
+    """API endpoint to download capture logs as a text file"""
+    global capture_log
+
+    # Create log content with timestamp
+    log_content = f"AllSkyHyde Capture Logs\n"
+    log_content += f"Downloaded: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+    log_content += "="*60 + "\n\n"
+
+    if capture_log:
+        for line in capture_log:
+            log_content += line + "\n"
+    else:
+        log_content += "No logs available\n"
+
+    # Return as downloadable text file
+    return Response(
+        log_content,
+        mimetype="text/plain",
+        headers={"Content-Disposition": f"attachment;filename=allskyhyde_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"}
+    )
 
 
 @app.route('/api/background_capture/start', methods=['POST'])
@@ -614,11 +660,10 @@ def system_status():
 def system_restart():
     """Restart the system."""
     try:
-        app.logger.info("System restart requested")
+        print("System restart requested")
 
         # Stop background capture before restart
-        global stop_capture_flag
-        stop_capture_flag.set()
+        stop_background_capture()
 
         # Platform-specific restart commands
         if platform.system() == "Linux":
@@ -638,11 +683,10 @@ def system_restart():
 def system_shutdown():
     """Shutdown the system."""
     try:
-        app.logger.info("System shutdown requested")
+        print("System shutdown requested")
 
         # Stop background capture before shutdown
-        global stop_capture_flag
-        stop_capture_flag.set()
+        stop_background_capture()
 
         # Platform-specific shutdown commands
         if platform.system() == "Linux":
@@ -720,6 +764,10 @@ def api_settings():
                 app_settings['dst_enabled'] = data['dst_enabled']
             if 'openweather_api_key' in data:
                 app_settings['openweather_api_key'] = data['openweather_api_key']
+            if 'min_exposure_ms' in data:
+                app_settings['min_exposure_ms'] = max(1, int(data['min_exposure_ms']))
+            if 'max_exposure_ms' in data:
+                app_settings['max_exposure_ms'] = max(100, int(data['max_exposure_ms']))
 
             # Save configuration to file
             save_config()
@@ -1157,18 +1205,20 @@ def api_night_info():
         }), 500
 
 
+# Load configuration when module is imported (works with both gunicorn and direct run)
+print("Loading configuration...")
+load_config()
+print(f"Configuration loaded: Capture interval = {capture_interval}s")
+print(f"Location: lat={app_settings['latitude']}, lon={app_settings['longitude']}")
+
+# Start background capture automatically on startup if it was enabled before
+if background_capture_enabled:
+    print("Background capture was enabled, restarting...")
+    start_background_capture()
+else:
+    print("Background capture is disabled")
+
 if __name__ == '__main__':
-    # Load configuration from file
-    print("Loading configuration...")
-    load_config()
-    print(f"Configuration loaded: Capture interval = {capture_interval}s")
-    print(f"Location: lat={app_settings['latitude']}, lon={app_settings['longitude']}")
-
-    # Start background capture automatically on startup if it was enabled before
-    if background_capture_enabled:
-        print("Background capture was enabled, restarting...")
-        start_background_capture()
-    else:
-        print("Background capture is disabled")
-
+    # This block only runs when executed directly with python3 flask_app.py
+    # When running with gunicorn, the above code already ran during import
     app.run(host='0.0.0.0', port=5000, debug=False)

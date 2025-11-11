@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" serverName="kickpi@192.168.0.137:22 password" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
+  <component name="PublishConfigData" remoteFilesAllowedToDisappearOnAutoupload="false" confirmBeforeUploading="false">
     <option name="confirmBeforeUploading" value="false" />
     <serverData>
       <paths name="kickpi@192.168.0.137:22 password">
         <serverdata>
           <mappings>
-            <mapping deploy="/zwo_images" local="$PROJECT_DIR$" />
+            <mapping deploy="/home/kickpi/zwo_images" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

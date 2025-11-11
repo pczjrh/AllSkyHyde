@@ -10,21 +10,49 @@ import numpy as np
 from PIL import Image
 import os
 import sys
+import json
 from datetime import datetime
 from PIL import ImageDraw, ImageFont
 
 # Configuration
-OUTPUT_DIR = "./zwo_images"  # Directory to save images
+OUTPUT_DIR = os.path.expanduser("~/allsky_images")  # Directory to save images (dynamic path)
 GAIN = 50  # Camera gain (0-600, adjust based on your needs)
 BRIGHTNESS = 50  # Brightness setting
 TARGET_ADU = None  # Will be set to 1/4 of full-well capacity
-TEST_REGION_SIZE = 200  # Size of central test region (200x200 pixels)
+TEST_REGION_SIZE = 400  # Size of central test region (400x400 pixels - increased from 200x200)
 INITIAL_EXPOSURE_MS = 100  # Starting exposure for test shots
-MAX_EXPOSURE_MS = 30000  # Maximum exposure time (30 seconds)
-MIN_EXPOSURE_MS = 1  # Minimum exposure time
+MAX_EXPOSURE_MS = 30000  # Maximum exposure time (30 seconds) - can be overridden by config
+MIN_EXPOSURE_MS = 1  # Minimum exposure time - can be overridden by config
+FALLBACK_EXPOSURE_MS = 30000  # Fallback exposure if auto-exposure fails completely
 
 # Path to ZWO ASI SDK library
 ASI_LIB_PATH = '/usr/local/lib/libASICamera2.so'
+
+
+def load_exposure_config():
+    """Load min/max exposure settings from config file"""
+    global MIN_EXPOSURE_MS, MAX_EXPOSURE_MS, FALLBACK_EXPOSURE_MS
+
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_config.json")
+
+    try:
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+
+                if 'min_exposure_ms' in config:
+                    MIN_EXPOSURE_MS = max(1, int(config['min_exposure_ms']))
+                    print(f"Loaded min exposure: {MIN_EXPOSURE_MS} ms")
+
+                if 'max_exposure_ms' in config:
+                    MAX_EXPOSURE_MS = max(100, int(config['max_exposure_ms']))
+                    print(f"Loaded max exposure: {MAX_EXPOSURE_MS} ms")
+
+                # Set fallback to max exposure
+                FALLBACK_EXPOSURE_MS = MAX_EXPOSURE_MS
+    except Exception as e:
+        print(f"Warning: Could not load exposure config: {e}")
+        print(f"Using default values: min={MIN_EXPOSURE_MS}ms, max={MAX_EXPOSURE_MS}ms")
 
 
 def initialize_camera():
@@ -101,39 +129,61 @@ def configure_camera(camera, exposure_time_ms, image_type=asi.ASI_IMG_RAW8):
         pass
 
 
-def capture_test_image(camera, camera_info, exposure_time_ms, dtype):
+def capture_test_image(camera, camera_info, exposure_time_ms, dtype, retries=3):
     """Capture a test image and return the data"""
     import time
-    
-    # Start exposure
-    camera.start_exposure()
-    
-    # Wait for exposure to complete
-    timeout = (exposure_time_ms / 1000.0) + 5
-    start_time = time.time()
-    
-    while True:
-        status = camera.get_exposure_status()
-        if status == asi.ASI_EXP_SUCCESS:
-            break
-        elif status == asi.ASI_EXP_FAILED:
-            return None
-        
-        if time.time() - start_time > timeout:
-            return None
-        
-        time.sleep(0.01)
-    
-    # Get image data
-    img_data = camera.get_data_after_exposure()
-    
-    # Convert to numpy array with correct dtype
-    width = camera_info['MaxWidth']
-    height = camera_info['MaxHeight']
-    img_array = np.frombuffer(img_data, dtype=dtype)
-    img_array = img_array.reshape((height, width))
-    
-    return img_array
+
+    for attempt in range(retries):
+        try:
+            # Start exposure
+            camera.start_exposure()
+
+            # Wait for exposure to complete
+            timeout = (exposure_time_ms / 1000.0) + 10  # Increased timeout buffer
+            start_time = time.time()
+
+            while True:
+                status = camera.get_exposure_status()
+                if status == asi.ASI_EXP_SUCCESS:
+                    break
+                elif status == asi.ASI_EXP_FAILED:
+                    if attempt < retries - 1:
+                        print(f"    Exposure failed, retrying (attempt {attempt + 2}/{retries})...")
+                        time.sleep(0.5)
+                        break
+                    return None
+
+                if time.time() - start_time > timeout:
+                    if attempt < retries - 1:
+                        print(f"    Timeout, retrying (attempt {attempt + 2}/{retries})...")
+                        time.sleep(0.5)
+                        break
+                    return None
+
+                time.sleep(0.01)
+
+            # Only get data if exposure succeeded
+            if status == asi.ASI_EXP_SUCCESS:
+                # Get image data
+                img_data = camera.get_data_after_exposure()
+
+                # Convert to numpy array with correct dtype
+                width = camera_info['MaxWidth']
+                height = camera_info['MaxHeight']
+                img_array = np.frombuffer(img_data, dtype=dtype)
+                img_array = img_array.reshape((height, width))
+
+                return img_array
+
+        except Exception as e:
+            if attempt < retries - 1:
+                print(f"    Capture error: {e}, retrying (attempt {attempt + 2}/{retries})...")
+                time.sleep(0.5)
+            else:
+                print(f"    Capture error: {e}")
+                return None
+
+    return None
 
 
 def get_central_region_mean(img_array, region_size=200):
@@ -156,68 +206,174 @@ def get_central_region_mean(img_array, region_size=200):
 
 
 def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
-    """Find optimal exposure time to reach target brightness"""
-    print("\n" + "="*60)
-    print("FINDING OPTIMAL EXPOSURE TIME")
-    print("="*60)
-    
-    exposure_time_ms = INITIAL_EXPOSURE_MS
-    max_iterations = 10
-    tolerance = 0.05  # 5% tolerance
-    
-    for iteration in range(max_iterations):
-        print(f"\nIteration {iteration + 1}:")
-        print(f"  Testing exposure: {exposure_time_ms:.1f} ms")
-        
+    """
+    Find optimal exposure time to reach target brightness using an incremental approach.
+
+    This improved algorithm:
+    - Incrementally increases exposure times rather than using proportional feedback
+    - Logs all attempts and failures for debugging
+    - Uses a larger test region (400x400 vs 200x200)
+    - Has a fallback to max exposure if nothing else works
+    """
+    print("\n" + "="*60, flush=True)
+    print("FINDING OPTIMAL EXPOSURE TIME (INCREMENTAL METHOD)", flush=True)
+    print("="*60, flush=True)
+    print(f"Min exposure: {MIN_EXPOSURE_MS} ms", flush=True)
+    print(f"Max exposure: {MAX_EXPOSURE_MS} ms", flush=True)
+    print(f"Target brightness: {target_adu:.1f} ADU", flush=True)
+    print(f"Test region size: {TEST_REGION_SIZE}x{TEST_REGION_SIZE} pixels", flush=True)
+
+    # Incremental exposure steps (in milliseconds)
+    # Start with small steps, then larger steps for longer exposures
+    exposure_steps = [
+        10, 20, 50, 100, 200, 300, 500, 750,
+        1000, 1500, 2000, 3000, 5000, 7500,
+        10000, 15000, 20000, 25000, 30000
+    ]
+
+    # Filter steps based on min/max limits
+    exposure_steps = [e for e in exposure_steps if MIN_EXPOSURE_MS <= e <= MAX_EXPOSURE_MS]
+
+    # Always ensure min and max are in the list
+    if MIN_EXPOSURE_MS not in exposure_steps:
+        exposure_steps.insert(0, MIN_EXPOSURE_MS)
+    if MAX_EXPOSURE_MS not in exposure_steps:
+        exposure_steps.append(MAX_EXPOSURE_MS)
+
+    exposure_steps = sorted(set(exposure_steps))
+
+    print(f"Testing {len(exposure_steps)} exposure values")
+
+    tolerance = 0.15  # Accept images within 15% of target
+    best_exposure = None
+    best_mean_adu = None
+    best_ratio_diff = float('inf')
+
+    failed_captures = []  # Track all failures
+    successful_captures = []  # Track all successes
+
+    for i, exposure_time_ms in enumerate(exposure_steps):
+        print(f"\n[{i+1}/{len(exposure_steps)}] Testing exposure: {exposure_time_ms:.0f} ms", flush=True)
+
         # Configure camera with test exposure
-        configure_camera(camera, exposure_time_ms, image_type)
-        
-        # Capture test image
-        img_array = capture_test_image(camera, camera_info, exposure_time_ms, dtype)
-        
+        try:
+            configure_camera(camera, exposure_time_ms, image_type)
+        except Exception as e:
+            error_msg = f"Failed to configure camera: {e}"
+            print(f"  ✗ {error_msg}", flush=True)
+            failed_captures.append({
+                'exposure_ms': exposure_time_ms,
+                'error': error_msg,
+                'type': 'configuration_error'
+            })
+            continue
+
+        # Capture test image with retries
+        img_array = capture_test_image(camera, camera_info, exposure_time_ms, dtype, retries=3)
+
         if img_array is None:
-            print("  Failed to capture test image!")
-            return None
-        
+            error_msg = "Failed to capture image after 3 retries"
+            print(f"  ✗ {error_msg}", flush=True)
+            failed_captures.append({
+                'exposure_ms': exposure_time_ms,
+                'error': error_msg,
+                'type': 'capture_failed'
+            })
+            # Continue to next exposure step
+            continue
+
         # Calculate mean of central region
-        mean_adu = get_central_region_mean(img_array, TEST_REGION_SIZE)
-        print(f"  Central region mean: {mean_adu:.1f} ADU")
-        print(f"  Target: {target_adu:.1f} ADU")
-        
-        # Check if we're within tolerance
+        try:
+            mean_adu = get_central_region_mean(img_array, TEST_REGION_SIZE)
+        except Exception as e:
+            error_msg = f"Failed to calculate brightness: {e}"
+            print(f"  ✗ {error_msg}", flush=True)
+            failed_captures.append({
+                'exposure_ms': exposure_time_ms,
+                'error': error_msg,
+                'type': 'calculation_error'
+            })
+            continue
+
         ratio = mean_adu / target_adu
-        print(f"  Ratio: {ratio:.3f}")
-        
-        if abs(ratio - 1.0) < tolerance:
-            print(f"\n✓ Optimal exposure found: {exposure_time_ms:.1f} ms")
+        ratio_diff = abs(ratio - 1.0)
+
+        print(f"  ✓ Mean brightness: {mean_adu:.1f} ADU (target: {target_adu:.1f})", flush=True)
+        print(f"  ✓ Ratio: {ratio:.3f} (difference: {ratio_diff:.3f})", flush=True)
+
+        # Record successful capture
+        successful_captures.append({
+            'exposure_ms': exposure_time_ms,
+            'mean_adu': mean_adu,
+            'ratio': ratio,
+            'ratio_diff': ratio_diff
+        })
+
+        # Update best result
+        if ratio_diff < best_ratio_diff:
+            best_ratio_diff = ratio_diff
+            best_exposure = exposure_time_ms
+            best_mean_adu = mean_adu
+            print(f"  → New best exposure: {best_exposure:.0f} ms (ratio diff: {best_ratio_diff:.3f})", flush=True)
+
+        # Check if we found an acceptable exposure
+        if ratio_diff < tolerance:
+            print(f"\n✓ ✓ ✓ OPTIMAL EXPOSURE FOUND: {exposure_time_ms:.0f} ms ✓ ✓ ✓", flush=True)
+            print(f"  Final brightness: {mean_adu:.1f} ADU (target: {target_adu:.1f})", flush=True)
+            print(f"  Within {ratio_diff*100:.1f}% of target", flush=True)
+            print_capture_summary(successful_captures, failed_captures)
+            sys.stdout.flush()
             return exposure_time_ms
-        
-        # Adjust exposure time based on ratio
-        # If too dark (ratio < 1), increase exposure
-        # If too bright (ratio > 1), decrease exposure
-        adjustment_factor = target_adu / mean_adu
-        new_exposure = exposure_time_ms * adjustment_factor
-        
-        # Apply limits and convert to int
-        new_exposure = int(max(MIN_EXPOSURE_MS, min(MAX_EXPOSURE_MS, new_exposure)))
-        
-        # Check if we're stuck (exposure not changing significantly)
-        if abs(new_exposure - exposure_time_ms) < 1:
-            print(f"\n✓ Converged to exposure: {exposure_time_ms:.1f} ms")
-            return exposure_time_ms
-        
-        exposure_time_ms = new_exposure
-        
-        # Check if we hit limits
-        if exposure_time_ms >= MAX_EXPOSURE_MS:
-            print(f"\n⚠ Hit maximum exposure limit: {MAX_EXPOSURE_MS} ms")
-            return MAX_EXPOSURE_MS
-        elif exposure_time_ms <= MIN_EXPOSURE_MS:
-            print(f"\n⚠ Hit minimum exposure limit: {MIN_EXPOSURE_MS} ms")
-            return MIN_EXPOSURE_MS
-    
-    print(f"\n⚠ Max iterations reached. Using: {exposure_time_ms:.1f} ms")
-    return exposure_time_ms
+
+        # If image is too dark and we're not at max yet, continue to longer exposures
+        if mean_adu < target_adu * 0.5 and i < len(exposure_steps) - 1:
+            print(f"  → Image too dark, continuing to longer exposures...", flush=True)
+            continue
+
+        # If image is too bright, we've likely passed the optimal point
+        if mean_adu > target_adu * 1.5:
+            print(f"  → Image too bright, optimal exposure is likely shorter", flush=True)
+            # Check if we have a good previous result
+            if best_exposure is not None and best_ratio_diff < 0.5:
+                print(f"\n✓ Using best previous result: {best_exposure:.0f} ms", flush=True)
+                print(f"  Brightness: {best_mean_adu:.1f} ADU (ratio diff: {best_ratio_diff:.3f})", flush=True)
+                print_capture_summary(successful_captures, failed_captures)
+                sys.stdout.flush()
+                return best_exposure
+
+    # If we get here, we've tested all exposures
+    print("\n" + "="*60)
+    print("EXPOSURE SEARCH COMPLETE")
+    print("="*60)
+    print_capture_summary(successful_captures, failed_captures)
+
+    # Use the best result we found
+    if best_exposure is not None:
+        print(f"\n✓ Using best exposure found: {best_exposure:.0f} ms")
+        print(f"  Brightness: {best_mean_adu:.1f} ADU (target: {target_adu:.1f})")
+        print(f"  Ratio difference: {best_ratio_diff:.3f}")
+        return best_exposure
+
+    # If everything failed, use fallback
+    print(f"\n⚠ ⚠ ⚠ ALL EXPOSURES FAILED - USING FALLBACK: {FALLBACK_EXPOSURE_MS} ms ⚠ ⚠ ⚠")
+    return FALLBACK_EXPOSURE_MS
+
+
+def print_capture_summary(successful_captures, failed_captures):
+    """Print a summary of all capture attempts"""
+    print(f"\nCapture Summary:")
+    print(f"  Successful: {len(successful_captures)}")
+    print(f"  Failed: {len(failed_captures)}")
+
+    if failed_captures:
+        print(f"\nFailed Captures:")
+        for failure in failed_captures:
+            print(f"  - {failure['exposure_ms']}ms: {failure['error']} ({failure['type']})")
+
+    if successful_captures:
+        print(f"\nSuccessful Captures:")
+        for capture in successful_captures:
+            print(f"  - {capture['exposure_ms']}ms: {capture['mean_adu']:.1f} ADU (ratio: {capture['ratio']:.3f})")
 
 
 def capture_final_image(camera, camera_info, output_dir, exposure_time_ms, image_type, dtype):
@@ -261,69 +417,78 @@ def capture_final_image(camera, camera_info, output_dir, exposure_time_ms, image
     return filepath
 
 
+def close_camera_safely(camera):
+    """Safely close camera with proper error handling"""
+    if camera is None:
+        return
+
+    try:
+        # Try to stop any ongoing exposure
+        try:
+            camera.stop_exposure()
+        except:
+            pass
+
+        # Close the camera
+        camera.close()
+        print("Camera closed successfully")
+    except Exception as e:
+        print(f"Warning during camera cleanup: {e}")
+        # Don't raise, just warn
+
+
 def main():
     """Main function"""
     camera = None
     try:
+        # Load exposure configuration from app_config.json
+        load_exposure_config()
+
         # Initialize camera
         camera, camera_info, target_adu, image_type, dtype = initialize_camera()
-        
+
         # Find optimal exposure time
         optimal_exposure = find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype)
-        
+
         if optimal_exposure is None:
-            print("\nFailed to find optimal exposure!")
-            if camera:
-                try:
-                    camera.close()
-                except:
-                    pass
-            sys.exit(1)
-        
+            print("\n⚠ Failed to find optimal exposure! Using default 1000ms.")
+            optimal_exposure = 1000  # Use 1 second as fallback
+
         # Capture final image with optimal exposure
         filepath = capture_final_image(camera, camera_info, OUTPUT_DIR, optimal_exposure, image_type, dtype)
-        
+
         if filepath:
             print("\n" + "="*60)
             print("SUCCESS!")
             print("="*60)
+            close_camera_safely(camera)
+            return True
         else:
-            print("\nFinal capture failed!")
-            if camera:
-                try:
-                    camera.close()
-                except:
-                    pass
-            sys.exit(1)
-        
-        # Close camera properly
-        if camera:
-            try:
-                camera.close()
-                del camera  # Explicitly delete the camera object
-            except:
-                pass
-        
-        return True
-        
+            print("\n⚠ Final capture failed! Trying one more time with fallback settings...")
+
+            # Try one more time with a safe exposure setting
+            fallback_exposure = 1000
+            filepath = capture_final_image(camera, camera_info, OUTPUT_DIR, fallback_exposure, image_type, dtype)
+
+            if filepath:
+                print("\n✓ Fallback capture succeeded!")
+                close_camera_safely(camera)
+                return True
+            else:
+                print("\n✗ All capture attempts failed!")
+                close_camera_safely(camera)
+                sys.exit(1)
+
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
-        if camera:
-            try:
-                camera.close()
-            except:
-                pass
+        close_camera_safely(camera)
         sys.exit(0)
-        
+
     except Exception as e:
-        print(f"\nError: {e}")
+        print(f"\n✗ Error: {e}")
         import traceback
         traceback.print_exc()
-        if camera:
-            try:
-                camera.close()
-            except:
-                pass
+        close_camera_safely(camera)
         sys.exit(1)
 
 
