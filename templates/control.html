@@ -45,6 +45,111 @@
             width: 100px;
             padding: 5px;
         }
+
+        /* Toggle Switch Styles - Bootstrap Style */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .toggle-container:last-child {
+            border-bottom: none;
+        }
+
+        .toggle-text {
+            font-size: 1em;
+            color: #ddd;
+            font-weight: 500;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 30px;
+            flex-shrink: 0;
+        }
+
+        .toggle-checkbox {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #dc3545;
+            transition: 0.4s;
+            border-radius: 30px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 24px;
+            width: 24px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .toggle-checkbox:checked + .toggle-slider {
+            background-color: #28a745;
+        }
+
+        .toggle-checkbox:checked + .toggle-slider:before {
+            transform: translateX(30px);
+        }
+
+        .toggle-slider:after {
+            content: 'OFF';
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            font-size: 10px;
+            font-weight: bold;
+            opacity: 1;
+            transition: opacity 0.2s;
+        }
+
+        .toggle-checkbox:checked + .toggle-slider:after {
+            content: 'ON';
+            left: auto;
+            right: 10px;
+            opacity: 1;
+        }
+
+        /* Fix styling for select and password fields in FTP settings */
+        .setting-item select,
+        .setting-item input[type="password"] {
+            width: 100%;
+            background-color: #333;
+            color: white;
+            border: 1px solid #555;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .setting-item select:focus,
+        .setting-item input[type="password"]:focus {
+            outline: none;
+            border-color: #64b5f6;
+        }
     </style>
 </head>
 <body>
@@ -156,6 +261,52 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- FTP/sFTP Transfer Settings -->
+                <div class="control-section">
+                    <div class="deletion-header" style="cursor: pointer; padding: 15px; background-color: #2a2a2a; border-radius: 8px; margin-bottom: 10px;" onclick="toggleFtpSettings()">
+                        <h2 style="margin: 0; display: inline-block;">FTP/sFTP Transfer Settings</h2>
+                        <span id="ftpToggleIcon" style="float: right; font-size: 20px;">▼</span>
+                    </div>
+                    <div id="ftpSettingsPanel" class="settings-group" style="display: none;">
+                        <div class="setting-item">
+                            <label for="ftpProtocol">Protocol:</label>
+                            <select id="ftpProtocol">
+                                <option value="ftp">FTP (port 21)</option>
+                                <option value="sftp">sFTP (port 22)</option>
+                            </select>
+                            <span class="setting-hint">Choose FTP or sFTP</span>
+                        </div>
+                        <div class="setting-item">
+                            <label for="ftpServer">Server Address:</label>
+                            <input type="text" id="ftpServer"
+                                   placeholder="ftp.example.com" value="">
+                            <span class="setting-hint">FTP/sFTP server hostname or IP</span>
+                        </div>
+                        <div class="setting-item">
+                            <label for="ftpPort">Port:</label>
+                            <input type="number" id="ftpPort" min="1" max="65535"
+                                   placeholder="21" value="21">
+                            <span class="setting-hint">FTP: 21, sFTP: 22</span>
+                        </div>
+                        <div class="setting-item">
+                            <label for="ftpUsername">Username:</label>
+                            <input type="text" id="ftpUsername"
+                                   placeholder="username" value="">
+                        </div>
+                        <div class="setting-item">
+                            <label for="ftpPassword">Password:</label>
+                            <input type="password" id="ftpPassword"
+                                   placeholder="password" value="">
+                        </div>
+                        <div class="setting-item">
+                            <label for="ftpRemotePath">Remote Path:</label>
+                            <input type="text" id="ftpRemotePath"
+                                   placeholder="/path/to/remote/folder" value="">
+                            <span class="setting-hint">Remote directory path</span>
+                        </div>
+                    </div>
+                </div>
                 </div>
 
                 <!-- Settings Panel on the Right -->
@@ -207,6 +358,46 @@
                                 <input type="text" id="openweatherApiKey"
                                        placeholder="Enter API key" value="">
                                 <span class="setting-hint">Get free API key at <a href="https://openweathermap.org/api" target="_blank">openweathermap.org</a></span>
+                            </div>
+                        </div>
+
+                        <!-- Capture Period Settings -->
+                        <div class="settings-group">
+                            <h3>Capture Periods</h3>
+                            <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
+                                Enable automatic capture during selected periods:
+                            </p>
+
+                            <div class="toggle-container">
+                                <span class="toggle-text">Daytime</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="captureDaytime" class="toggle-checkbox">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="toggle-container">
+                                <span class="toggle-text">Civil Twilight</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="captureCivilTwilight" class="toggle-checkbox">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="toggle-container">
+                                <span class="toggle-text">Nautical Twilight</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="captureNauticalTwilight" class="toggle-checkbox">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="toggle-container">
+                                <span class="toggle-text">Astronomical Darkness</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="captureAstronomicalDarkness" class="toggle-checkbox">
+                                    <span class="toggle-slider"></span>
+                                </label>
                             </div>
                         </div>
 
@@ -380,6 +571,20 @@
             window.location.href = '/api/download_logs';
         });
 
+        // FTP Settings Toggle
+        function toggleFtpSettings() {
+            const panel = document.getElementById('ftpSettingsPanel');
+            const icon = document.getElementById('ftpToggleIcon');
+
+            if (panel.style.display === 'none') {
+                panel.style.display = 'block';
+                icon.textContent = '▲';
+            } else {
+                panel.style.display = 'none';
+                icon.textContent = '▼';
+            }
+        }
+
         // Settings Management
         let settingsLoaded = false;
 
@@ -417,6 +622,32 @@
                         document.getElementById('maxExposureInput').value = data.max_exposure_ms;
                     }
 
+                    // Load capture period settings
+                    document.getElementById('captureDaytime').checked = data.capture_daytime || false;
+                    document.getElementById('captureCivilTwilight').checked = data.capture_civil_twilight || false;
+                    document.getElementById('captureNauticalTwilight').checked = data.capture_nautical_twilight || false;
+                    document.getElementById('captureAstronomicalDarkness').checked = data.capture_astronomical_darkness !== undefined ? data.capture_astronomical_darkness : true;
+
+                    // Load FTP/sFTP settings
+                    if (data.ftp_protocol) {
+                        document.getElementById('ftpProtocol').value = data.ftp_protocol;
+                    }
+                    if (data.ftp_server) {
+                        document.getElementById('ftpServer').value = data.ftp_server;
+                    }
+                    if (data.ftp_port) {
+                        document.getElementById('ftpPort').value = data.ftp_port;
+                    }
+                    if (data.ftp_username) {
+                        document.getElementById('ftpUsername').value = data.ftp_username;
+                    }
+                    if (data.ftp_password) {
+                        document.getElementById('ftpPassword').value = data.ftp_password;
+                    }
+                    if (data.ftp_remote_path) {
+                        document.getElementById('ftpRemotePath').value = data.ftp_remote_path;
+                    }
+
                     settingsLoaded = true;
 
                     // Update solar info if location is set
@@ -437,6 +668,16 @@
             const openweatherApiKey = document.getElementById('openweatherApiKey').value;
             const minExposure = document.getElementById('minExposureInput').value;
             const maxExposure = document.getElementById('maxExposureInput').value;
+            const captureDaytime = document.getElementById('captureDaytime').checked;
+            const captureCivilTwilight = document.getElementById('captureCivilTwilight').checked;
+            const captureNauticalTwilight = document.getElementById('captureNauticalTwilight').checked;
+            const captureAstronomicalDarkness = document.getElementById('captureAstronomicalDarkness').checked;
+            const ftpProtocol = document.getElementById('ftpProtocol').value;
+            const ftpServer = document.getElementById('ftpServer').value;
+            const ftpPort = document.getElementById('ftpPort').value;
+            const ftpUsername = document.getElementById('ftpUsername').value;
+            const ftpPassword = document.getElementById('ftpPassword').value;
+            const ftpRemotePath = document.getElementById('ftpRemotePath').value;
 
             const settings = {
                 latitude: latitude ? parseFloat(latitude) : null,
@@ -445,7 +686,17 @@
                 dst_enabled: dstEnabled,
                 openweather_api_key: openweatherApiKey || null,
                 min_exposure_ms: minExposure ? parseInt(minExposure) : 1,
-                max_exposure_ms: maxExposure ? parseInt(maxExposure) : 30000
+                max_exposure_ms: maxExposure ? parseInt(maxExposure) : 30000,
+                capture_daytime: captureDaytime,
+                capture_civil_twilight: captureCivilTwilight,
+                capture_nautical_twilight: captureNauticalTwilight,
+                capture_astronomical_darkness: captureAstronomicalDarkness,
+                ftp_protocol: ftpProtocol || 'ftp',
+                ftp_server: ftpServer || null,
+                ftp_port: ftpPort ? parseInt(ftpPort) : 21,
+                ftp_username: ftpUsername || null,
+                ftp_password: ftpPassword || null,
+                ftp_remote_path: ftpRemotePath || null
             };
 
             fetch('/api/settings', {

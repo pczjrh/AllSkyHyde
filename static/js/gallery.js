@@ -219,3 +219,43 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// sFTP Transfer Functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const sftpTransferButton = document.getElementById('sftpTransferButton');
+    const sftpTransferStatus = document.getElementById('sftpTransferStatus');
+
+    if (sftpTransferButton) {
+        sftpTransferButton.addEventListener('click', async function() {
+            // Disable button during transfer
+            sftpTransferButton.disabled = true;
+            sftpTransferStatus.innerHTML = '<span class="info">Transferring images to sFTP server...</span>';
+            sftpTransferStatus.style.color = '#ffc107';
+
+            try {
+                const response = await fetch('/api/sftp/transfer', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    sftpTransferStatus.innerHTML = `<span class="success">${result.message}<br>Transferred: ${result.transferred}, Skipped: ${result.skipped}, Errors: ${result.errors}</span>`;
+                    sftpTransferStatus.style.color = '#28a745';
+                } else {
+                    sftpTransferStatus.innerHTML = `<span class="error">Error: ${result.message}</span>`;
+                    sftpTransferStatus.style.color = '#dc3545';
+                }
+            } catch (error) {
+                sftpTransferStatus.innerHTML = `<span class="error">Transfer failed: ${error.message}</span>`;
+                sftpTransferStatus.style.color = '#dc3545';
+            } finally {
+                // Re-enable button after transfer
+                sftpTransferButton.disabled = false;
+            }
+        });
+    }
+});

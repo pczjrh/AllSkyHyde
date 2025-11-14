@@ -207,42 +207,21 @@ def get_central_region_mean(img_array, region_size=200):
 
 def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
     """
-    Find optimal exposure time to reach target brightness using an incremental approach.
+    Find optimal exposure time to reach target brightness using a smart search approach.
 
     This improved algorithm:
-    - Incrementally increases exposure times rather than using proportional feedback
+    - Tests initial exposure steps to find bounds (too dark / too bright)
+    - Refines search between bounds using smaller steps
+    - Stops searching when image is too bright (no need to test longer exposures)
     - Logs all attempts and failures for debugging
-    - Uses a larger test region (400x400 vs 200x200)
-    - Has a fallback to max exposure if nothing else works
     """
     print("\n" + "="*60, flush=True)
-    print("FINDING OPTIMAL EXPOSURE TIME (INCREMENTAL METHOD)", flush=True)
+    print("FINDING OPTIMAL EXPOSURE TIME (SMART SEARCH)", flush=True)
     print("="*60, flush=True)
     print(f"Min exposure: {MIN_EXPOSURE_MS} ms", flush=True)
     print(f"Max exposure: {MAX_EXPOSURE_MS} ms", flush=True)
     print(f"Target brightness: {target_adu:.1f} ADU", flush=True)
     print(f"Test region size: {TEST_REGION_SIZE}x{TEST_REGION_SIZE} pixels", flush=True)
-
-    # Incremental exposure steps (in milliseconds)
-    # Start with small steps, then larger steps for longer exposures
-    exposure_steps = [
-        10, 20, 50, 100, 200, 300, 500, 750,
-        1000, 1500, 2000, 3000, 5000, 7500,
-        10000, 15000, 20000, 25000, 30000
-    ]
-
-    # Filter steps based on min/max limits
-    exposure_steps = [e for e in exposure_steps if MIN_EXPOSURE_MS <= e <= MAX_EXPOSURE_MS]
-
-    # Always ensure min and max are in the list
-    if MIN_EXPOSURE_MS not in exposure_steps:
-        exposure_steps.insert(0, MIN_EXPOSURE_MS)
-    if MAX_EXPOSURE_MS not in exposure_steps:
-        exposure_steps.append(MAX_EXPOSURE_MS)
-
-    exposure_steps = sorted(set(exposure_steps))
-
-    print(f"Testing {len(exposure_steps)} exposure values")
 
     tolerance = 0.15  # Accept images within 15% of target
     best_exposure = None
@@ -252,8 +231,11 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
     failed_captures = []  # Track all failures
     successful_captures = []  # Track all successes
 
-    for i, exposure_time_ms in enumerate(exposure_steps):
-        print(f"\n[{i+1}/{len(exposure_steps)}] Testing exposure: {exposure_time_ms:.0f} ms", flush=True)
+    # Helper function to test an exposure
+    def test_exposure(exposure_time_ms):
+        nonlocal best_exposure, best_mean_adu, best_ratio_diff
+
+        print(f"\nTesting exposure: {exposure_time_ms:.0f} ms", flush=True)
 
         # Configure camera with test exposure
         try:
@@ -266,7 +248,7 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
                 'error': error_msg,
                 'type': 'configuration_error'
             })
-            continue
+            return None
 
         # Capture test image with retries
         img_array = capture_test_image(camera, camera_info, exposure_time_ms, dtype, retries=3)
@@ -279,8 +261,7 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
                 'error': error_msg,
                 'type': 'capture_failed'
             })
-            # Continue to next exposure step
-            continue
+            return None
 
         # Calculate mean of central region
         try:
@@ -293,7 +274,7 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
                 'error': error_msg,
                 'type': 'calculation_error'
             })
-            continue
+            return None
 
         ratio = mean_adu / target_adu
         ratio_diff = abs(ratio - 1.0)
@@ -316,46 +297,97 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
             best_mean_adu = mean_adu
             print(f"  → New best exposure: {best_exposure:.0f} ms (ratio diff: {best_ratio_diff:.3f})", flush=True)
 
-        # Check if we found an acceptable exposure
-        if ratio_diff < tolerance:
-            print(f"\n✓ ✓ ✓ OPTIMAL EXPOSURE FOUND: {exposure_time_ms:.0f} ms ✓ ✓ ✓", flush=True)
-            print(f"  Final brightness: {mean_adu:.1f} ADU (target: {target_adu:.1f})", flush=True)
-            print(f"  Within {ratio_diff*100:.1f}% of target", flush=True)
-            print_capture_summary(successful_captures, failed_captures)
-            sys.stdout.flush()
-            return exposure_time_ms
+        return mean_adu
 
-        # If image is too dark and we're not at max yet, continue to longer exposures
-        if mean_adu < target_adu * 0.5 and i < len(exposure_steps) - 1:
-            print(f"  → Image too dark, continuing to longer exposures...", flush=True)
+    # PHASE 1: Find bounds using coarse steps
+    print("\n--- PHASE 1: Finding bounds ---", flush=True)
+    coarse_steps = [1, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000]
+    coarse_steps = [e for e in coarse_steps if MIN_EXPOSURE_MS <= e <= MAX_EXPOSURE_MS]
+
+    lower_bound = None  # Exposure that's too dark
+    upper_bound = None  # Exposure that's too bright
+
+    for exposure_ms in coarse_steps:
+        mean_adu = test_exposure(exposure_ms)
+
+        if mean_adu is None:
             continue
 
-        # If image is too bright, we've likely passed the optimal point
-        if mean_adu > target_adu * 1.5:
-            print(f"  → Image too bright, optimal exposure is likely shorter", flush=True)
-            # Check if we have a good previous result
-            if best_exposure is not None and best_ratio_diff < 0.5:
-                print(f"\n✓ Using best previous result: {best_exposure:.0f} ms", flush=True)
-                print(f"  Brightness: {best_mean_adu:.1f} ADU (ratio diff: {best_ratio_diff:.3f})", flush=True)
+        ratio_diff = abs(mean_adu / target_adu - 1.0)
+
+        # Found good exposure?
+        if ratio_diff < tolerance:
+            print(f"\n✓ ✓ ✓ OPTIMAL EXPOSURE FOUND: {exposure_ms:.0f} ms ✓ ✓ ✓", flush=True)
+            print(f"  Final brightness: {mean_adu:.1f} ADU (target: {target_adu:.1f})", flush=True)
+            print_capture_summary(successful_captures, failed_captures)
+            sys.stdout.flush()
+            return exposure_ms
+
+        # Track bounds
+        if mean_adu < target_adu:
+            lower_bound = exposure_ms
+            print(f"  → Too dark, setting lower bound to {lower_bound} ms", flush=True)
+        else:
+            upper_bound = exposure_ms
+            print(f"  → Too bright, setting upper bound to {upper_bound} ms", flush=True)
+            # Once we find it's too bright, we have our bounds
+            if lower_bound is not None:
+                print(f"\n✓ Bounds found: {lower_bound} ms (too dark) to {upper_bound} ms (too bright)", flush=True)
+                break
+
+    # PHASE 2: Refine search between bounds
+    if lower_bound is not None and upper_bound is not None:
+        print(f"\n--- PHASE 2: Refining search between {lower_bound} and {upper_bound} ms ---", flush=True)
+
+        # Generate refinement steps between bounds
+        refine_steps = []
+        diff = upper_bound - lower_bound
+
+        if diff > 100:
+            # Large gap: use 10ms steps or 10 steps, whichever is smaller
+            step_size = min(10, diff // 10)
+            refine_steps = list(range(int(lower_bound), int(upper_bound), int(step_size)))
+        elif diff > 10:
+            # Medium gap: use 1ms steps
+            refine_steps = list(range(int(lower_bound), int(upper_bound), 1))
+        else:
+            # Small gap: use 0.5ms steps
+            refine_steps = [lower_bound + i * 0.5 for i in range(1, int(diff * 2))]
+
+        # Test refinement steps
+        for exposure_ms in refine_steps:
+            if exposure_ms <= lower_bound or exposure_ms >= upper_bound:
+                continue
+
+            mean_adu = test_exposure(exposure_ms)
+
+            if mean_adu is None:
+                continue
+
+            ratio_diff = abs(mean_adu / target_adu - 1.0)
+
+            # Found good exposure?
+            if ratio_diff < tolerance:
+                print(f"\n✓ ✓ ✓ OPTIMAL EXPOSURE FOUND: {exposure_ms:.0f} ms ✓ ✓ ✓", flush=True)
+                print(f"  Final brightness: {mean_adu:.1f} ADU (target: {target_adu:.1f})", flush=True)
                 print_capture_summary(successful_captures, failed_captures)
                 sys.stdout.flush()
-                return best_exposure
-
-    # If we get here, we've tested all exposures
-    print("\n" + "="*60)
-    print("EXPOSURE SEARCH COMPLETE")
-    print("="*60)
-    print_capture_summary(successful_captures, failed_captures)
+                return exposure_ms
 
     # Use the best result we found
+    print("\n" + "="*60, flush=True)
+    print("EXPOSURE SEARCH COMPLETE", flush=True)
+    print("="*60, flush=True)
+    print_capture_summary(successful_captures, failed_captures)
+
     if best_exposure is not None:
-        print(f"\n✓ Using best exposure found: {best_exposure:.0f} ms")
-        print(f"  Brightness: {best_mean_adu:.1f} ADU (target: {target_adu:.1f})")
-        print(f"  Ratio difference: {best_ratio_diff:.3f}")
+        print(f"\n✓ Using best exposure found: {best_exposure:.0f} ms", flush=True)
+        print(f"  Brightness: {best_mean_adu:.1f} ADU (target: {target_adu:.1f})", flush=True)
+        print(f"  Ratio difference: {best_ratio_diff:.3f}", flush=True)
         return best_exposure
 
     # If everything failed, use fallback
-    print(f"\n⚠ ⚠ ⚠ ALL EXPOSURES FAILED - USING FALLBACK: {FALLBACK_EXPOSURE_MS} ms ⚠ ⚠ ⚠")
+    print(f"\n⚠ ⚠ ⚠ ALL EXPOSURES FAILED - USING FALLBACK: {FALLBACK_EXPOSURE_MS} ms ⚠ ⚠ ⚠", flush=True)
     return FALLBACK_EXPOSURE_MS
 
 

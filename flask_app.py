@@ -5,7 +5,7 @@ import glob
 import re
 import json
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 import time
 import shutil
@@ -46,7 +46,17 @@ app_settings = {
     "dst_enabled": False,
     "openweather_api_key": None,
     "min_exposure_ms": 1,
-    "max_exposure_ms": 30000
+    "max_exposure_ms": 30000,
+    "capture_daytime": False,
+    "capture_civil_twilight": False,
+    "capture_nautical_twilight": False,
+    "capture_astronomical_darkness": True,
+    "ftp_protocol": "ftp",  # "ftp" or "sftp"
+    "ftp_server": None,
+    "ftp_port": 21,
+    "ftp_username": None,
+    "ftp_password": None,
+    "ftp_remote_path": None
 }
 
 # NOTE: Configuration loading moved to after function definitions to avoid import errors
@@ -134,7 +144,8 @@ def extract_metadata_from_filename(filename):
     """Extract metadata from the ZWO image filename"""
     metadata = {
         "timestamp": None,
-        "exposure_ms": None
+        "exposure_ms": None,
+        "datetime_obj": None
     }
 
     # Extract timestamp (format: YYYYMMDD_HHMMSS_expXXXms.png)
@@ -144,6 +155,7 @@ def extract_metadata_from_filename(filename):
         try:
             dt = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
             metadata["timestamp"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+            metadata["datetime_obj"] = dt
         except ValueError:
             pass
 
@@ -153,6 +165,33 @@ def extract_metadata_from_filename(filename):
         metadata["exposure_ms"] = int(exposure_match.group(1))
 
     return metadata
+
+
+def get_night_session_for_image(image_datetime):
+    """
+    Determine which night session an image belongs to.
+    A night session runs from noon of one day to noon of the next day.
+    Images taken before noon belong to the previous night, images after noon belong to that night.
+    Returns a tuple: (session_start_date, session_end_date, display_label)
+    """
+    if image_datetime is None:
+        return None, None, "Unknown Date"
+
+    # If the image was taken before noon (12:00), it belongs to the previous night
+    # If taken after noon, it belongs to tonight
+    if image_datetime.hour < 12:
+        # Before noon - this is the end of the previous night
+        night_start = (image_datetime - timedelta(days=1)).date()
+        night_end = image_datetime.date()
+    else:
+        # After noon - this is the start of tonight
+        night_start = image_datetime.date()
+        night_end = (image_datetime + timedelta(days=1)).date()
+
+    # Format: "Night of 2024-11-13 to 2024-11-14"
+    display_label = f"Night of {night_start.strftime('%Y-%m-%d')} to {night_end.strftime('%Y-%m-%d')}"
+
+    return night_start, night_end, display_label
 
 
 def get_all_images():
@@ -170,13 +209,19 @@ def get_all_images():
         stats = os.stat(img_path)
         file_size = stats.st_size / (1024 * 1024)  # Convert to MB
 
+        # Calculate night session
+        night_start, night_end, night_label = get_night_session_for_image(metadata["datetime_obj"])
+
         images.append({
             "filename": filename,
             "path": img_path,
             "timestamp": metadata["timestamp"],
             "exposure_ms": metadata["exposure_ms"],
             "size_mb": round(file_size, 2),
-            "modified": datetime.fromtimestamp(stats.st_mtime)
+            "modified": datetime.fromtimestamp(stats.st_mtime),
+            "night_session_start": night_start,
+            "night_session_end": night_end,
+            "night_session_label": night_label
         })
 
     # Sort by modification time (newest first)
@@ -222,6 +267,126 @@ def run_single_capture(exposure_ms=None):
         return False
 
 
+def get_current_twilight_period():
+    """
+    Determine what twilight period we're currently in based on location and time.
+    Returns: ('daytime', 'civil_twilight', 'nautical_twilight', 'astronomical_darkness', or 'unknown')
+    """
+    global app_settings
+
+    # Need location to calculate
+    if app_settings['latitude'] is None or app_settings['longitude'] is None:
+        return 'unknown'
+
+    try:
+        import math
+        now = datetime.now()
+        lat = app_settings['latitude']
+        lon = app_settings['longitude']
+
+        # Calculate solar times using the same function from api_solar_info
+        def calculate_solar_noon(lon):
+            return 12.0 - (lon / 15.0)
+
+        def calculate_sunrise_sunset(lat, lon, date):
+            day_of_year = date.timetuple().tm_yday
+            declination = 23.45 * math.sin(math.radians((360/365) * (day_of_year - 81)))
+            lat_rad = math.radians(lat)
+            dec_rad = math.radians(declination)
+            cos_hour_angle = -math.tan(lat_rad) * math.tan(dec_rad)
+
+            if cos_hour_angle > 1:
+                return None, None
+            elif cos_hour_angle < -1:
+                return "00:00", "23:59"
+
+            hour_angle = math.degrees(math.acos(cos_hour_angle))
+            solar_noon = calculate_solar_noon(lon)
+            sunrise_hour = solar_noon - (hour_angle / 15.0)
+            sunset_hour = solar_noon + (hour_angle / 15.0)
+
+            tz_offset = app_settings.get('timezone', 0) or 0
+            if app_settings.get('dst_enabled'):
+                tz_offset += 1
+
+            sunrise_hour += tz_offset
+            sunset_hour += tz_offset
+
+            return sunrise_hour, sunset_hour
+
+        sunrise_hour, sunset_hour = calculate_sunrise_sunset(lat, lon, now)
+
+        if sunrise_hour is None or sunset_hour is None:
+            return 'unknown'
+
+        # Calculate twilight times
+        civil_twilight_end = (sunset_hour + 0.5) % 24  # ~30 min after sunset
+        nautical_twilight_end = (sunset_hour + 1.0) % 24  # ~1 hour after sunset
+        astronomical_twilight_end = (sunset_hour + 1.5) % 24  # ~1.5 hours after sunset
+        astronomical_twilight_begin = (sunrise_hour - 1.5) % 24  # ~1.5 hours before sunrise
+        nautical_twilight_begin = (sunrise_hour - 1.0) % 24  # ~1 hour before sunrise
+        civil_twilight_begin = (sunrise_hour - 0.5) % 24  # ~30 min before sunrise
+
+        # Current time in hours
+        current_hour = now.hour + now.minute / 60
+
+        # Determine period (checking from darkest to lightest)
+        # Handle cases that may cross midnight
+
+        # Check if we're in astronomical darkness
+        if astronomical_twilight_end < astronomical_twilight_begin:
+            # Crosses midnight
+            if current_hour >= astronomical_twilight_end or current_hour < astronomical_twilight_begin:
+                return 'astronomical_darkness'
+        else:
+            if astronomical_twilight_end <= current_hour < astronomical_twilight_begin:
+                return 'astronomical_darkness'
+
+        # Check if we're in nautical twilight
+        if sunset_hour <= current_hour < astronomical_twilight_end or astronomical_twilight_begin <= current_hour < sunrise_hour:
+            return 'nautical_twilight'
+
+        # Check if we're in civil twilight
+        if (sunset_hour - 0.5) <= current_hour < sunset_hour or sunrise_hour <= current_hour < (sunrise_hour + 0.5):
+            return 'civil_twilight'
+
+        # Otherwise we're in daytime
+        return 'daytime'
+
+    except Exception as e:
+        print(f"Error calculating twilight period: {e}")
+        return 'unknown'
+
+
+def should_capture_be_active():
+    """
+    Check if background capture should be active based on current twilight period and settings.
+    Returns: (should_be_active: bool, reason: str)
+    """
+    global app_settings
+
+    current_period = get_current_twilight_period()
+
+    if current_period == 'unknown':
+        # If we can't determine, default to allowing capture
+        return True, "Unable to determine twilight period, allowing capture"
+
+    # Check each period
+    if current_period == 'astronomical_darkness' and app_settings.get('capture_astronomical_darkness', True):
+        return True, "Astronomical darkness - capture enabled"
+
+    if current_period == 'nautical_twilight' and app_settings.get('capture_nautical_twilight', False):
+        return True, "Nautical twilight - capture enabled"
+
+    if current_period == 'civil_twilight' and app_settings.get('capture_civil_twilight', False):
+        return True, "Civil twilight - capture enabled"
+
+    if current_period == 'daytime' and app_settings.get('capture_daytime', False):
+        return True, "Daytime - capture enabled"
+
+    return False, f"Current period ({current_period}) - capture disabled by settings"
+
+
 def background_capture_loop():
     """Background thread that captures images at regular intervals"""
     global is_capturing, stop_capture_flag, capture_log, last_capture_time, background_capture_enabled
@@ -230,17 +395,25 @@ def background_capture_loop():
 
     try:
         while not stop_capture_flag:
-            is_capturing = True
+            # Check if we should capture based on twilight period settings
+            should_capture, reason = should_capture_be_active()
 
-            # Run capture
-            success = run_single_capture()
+            if should_capture:
+                is_capturing = True
 
-            is_capturing = False
+                # Run capture
+                success = run_single_capture()
 
-            if success:
-                capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting {capture_interval} seconds until next capture...")
+                is_capturing = False
+
+                if success:
+                    capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting {capture_interval} seconds until next capture...")
+                else:
+                    capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Capture failed, will retry in {capture_interval} seconds...")
             else:
-                capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Capture failed, will retry in {capture_interval} seconds...")
+                # Not in capture window
+                is_capturing = False
+                capture_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {reason}")
 
             # Wait for the interval (check stop flag every second)
             for _ in range(capture_interval):
@@ -660,22 +833,72 @@ def system_status():
 def system_restart():
     """Restart the system."""
     try:
-        print("System restart requested")
+        import os
+        print("="*80)
+        print("SYSTEM RESTART REQUESTED")
+        print("="*80)
+        app.logger.info("="*80)
+        app.logger.info("SYSTEM RESTART REQUESTED")
+
+        # Log environment info
+        print(f"Platform: {platform.system()}")
+        print(f"User: {os.getenv('USER', 'unknown')}")
+        print(f"PATH: {os.getenv('PATH', 'not set')}")
+        app.logger.info(f"Platform: {platform.system()}")
+        app.logger.info(f"User: {os.getenv('USER', 'unknown')}")
 
         # Stop background capture before restart
+        print("Stopping background capture...")
+        app.logger.info("Stopping background capture...")
         stop_background_capture()
+        print("Background capture stopped")
+        app.logger.info("Background capture stopped")
 
         # Platform-specific restart commands
         if platform.system() == "Linux":
-            subprocess.Popen(["sudo", "reboot"])
+            # Execute reboot command directly (passwordless sudo configured in sudoers)
+            print("Executing: /usr/bin/sudo /usr/sbin/reboot")
+            app.logger.info("Executing: /usr/bin/sudo /usr/sbin/reboot")
+
+            result = subprocess.run("/usr/bin/sudo /usr/sbin/reboot", shell=True,
+                                   capture_output=True, text=True, timeout=5)
+
+            print(f"Reboot command exit code: {result.returncode}")
+            print(f"Reboot stdout: {result.stdout}")
+            print(f"Reboot stderr: {result.stderr}")
+            app.logger.info(f"Reboot command exit code: {result.returncode}")
+            app.logger.info(f"Reboot stdout: {result.stdout}")
+            app.logger.info(f"Reboot stderr: {result.stderr}")
+
+            # Exit code -15 (SIGTERM) is expected when system is shutting down
+            if result.returncode != 0 and result.returncode != -15:
+                error_msg = f"Reboot command failed with exit code {result.returncode}. stderr: {result.stderr}"
+                print(error_msg)
+                app.logger.error(error_msg)
+                return jsonify({"status": "error", "message": error_msg}), 500
+
+            print("Reboot command executed successfully (system is rebooting)")
+            app.logger.info("Reboot command executed successfully (system is rebooting)")
+            print("="*80)
+
         elif platform.system() == "Windows":
             subprocess.Popen(["shutdown", "/r", "/t", "5"])
         else:
             return jsonify({"status": "error", "message": "Unsupported platform"}), 400
 
-        return jsonify({"status": "success", "message": "System restart initiated"})
+        return jsonify({"status": "success", "message": "System restart command executed successfully. System should restart shortly."})
+    except subprocess.TimeoutExpired:
+        error_msg = "Reboot command timed out (this might be normal as system is shutting down)"
+        print(error_msg)
+        app.logger.warning(error_msg)
+        return jsonify({"status": "success", "message": error_msg})
     except Exception as e:
-        app.logger.error(f"Error restarting system: {str(e)}")
+        error_msg = f"Error restarting system: {str(e)}"
+        print(error_msg)
+        app.logger.error(error_msg)
+        import traceback
+        traceback.print_exc()
+        app.logger.error(traceback.format_exc())
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -683,25 +906,325 @@ def system_restart():
 def system_shutdown():
     """Shutdown the system."""
     try:
-        print("System shutdown requested")
+        import os
+        print("="*80)
+        print("SYSTEM SHUTDOWN REQUESTED")
+        print("="*80)
+        app.logger.info("="*80)
+        app.logger.info("SYSTEM SHUTDOWN REQUESTED")
+
+        # Log environment info
+        print(f"Platform: {platform.system()}")
+        print(f"User: {os.getenv('USER', 'unknown')}")
+        print(f"PATH: {os.getenv('PATH', 'not set')}")
+        app.logger.info(f"Platform: {platform.system()}")
+        app.logger.info(f"User: {os.getenv('USER', 'unknown')}")
 
         # Stop background capture before shutdown
+        print("Stopping background capture...")
+        app.logger.info("Stopping background capture...")
         stop_background_capture()
+        print("Background capture stopped")
+        app.logger.info("Background capture stopped")
 
         # Platform-specific shutdown commands
         if platform.system() == "Linux":
-            subprocess.Popen(["sudo", "poweroff"])
+            # Execute poweroff command directly (passwordless sudo configured in sudoers)
+            print("Executing: /usr/bin/sudo /usr/sbin/poweroff")
+            app.logger.info("Executing: /usr/bin/sudo /usr/sbin/poweroff")
+
+            result = subprocess.run("/usr/bin/sudo /usr/sbin/poweroff", shell=True,
+                                   capture_output=True, text=True, timeout=5)
+
+            print(f"Poweroff command exit code: {result.returncode}")
+            print(f"Poweroff stdout: {result.stdout}")
+            print(f"Poweroff stderr: {result.stderr}")
+            app.logger.info(f"Poweroff command exit code: {result.returncode}")
+            app.logger.info(f"Poweroff stdout: {result.stdout}")
+            app.logger.info(f"Poweroff stderr: {result.stderr}")
+
+            # Exit code -15 (SIGTERM) is expected when system is shutting down
+            if result.returncode != 0 and result.returncode != -15:
+                error_msg = f"Poweroff command failed with exit code {result.returncode}. stderr: {result.stderr}"
+                print(error_msg)
+                app.logger.error(error_msg)
+                return jsonify({"status": "error", "message": error_msg}), 500
+
+            print("Poweroff command executed successfully (system is shutting down)")
+            app.logger.info("Poweroff command executed successfully (system is shutting down)")
+            print("="*80)
+
         elif platform.system() == "Windows":
             subprocess.Popen(["shutdown", "/s", "/t", "5"])
         else:
             return jsonify({"status": "error", "message": "Unsupported platform"}), 400
 
-        return jsonify({"status": "success", "message": "System shutdown initiated"})
+        return jsonify({"status": "success", "message": "System shutdown command executed successfully. System should shutdown shortly."})
+    except subprocess.TimeoutExpired:
+        error_msg = "Poweroff command timed out (this might be normal as system is shutting down)"
+        print(error_msg)
+        app.logger.warning(error_msg)
+        return jsonify({"status": "success", "message": error_msg})
     except Exception as e:
-        app.logger.error(f"Error shutting down system: {str(e)}")
+        error_msg = f"Error shutting down system: {str(e)}"
+        print(error_msg)
+        app.logger.error(error_msg)
+        import traceback
+        traceback.print_exc()
+        app.logger.error(traceback.format_exc())
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/api/sftp/transfer', methods=['POST'])
+def sftp_transfer_images():
+    """Transfer all images to FTP or sFTP server"""
+    global app_settings
+
+    try:
+        # Check if FTP/sFTP is configured
+        if not all([app_settings.get('ftp_server'),
+                   app_settings.get('ftp_username'),
+                   app_settings.get('ftp_password'),
+                   app_settings.get('ftp_remote_path')]):
+            return jsonify({
+                "status": "error",
+                "message": "FTP/sFTP not configured. Please fill in all FTP settings."
+            }), 400
+
+        protocol = app_settings.get('ftp_protocol', 'ftp').lower()
+
+        print("="*80)
+        print(f"{protocol.upper()} TRANSFER REQUESTED")
+        print("="*80)
+        app.logger.info(f"{protocol.upper()} transfer started")
+
+        ftp_server = app_settings['ftp_server']
+        ftp_port = app_settings.get('ftp_port', 21 if protocol == 'ftp' else 22)
+        ftp_username = app_settings['ftp_username']
+        ftp_password = app_settings['ftp_password']
+        ftp_remote_path = app_settings['ftp_remote_path']
+
+        print(f"Connecting to {ftp_username}@{ftp_server}:{ftp_port}")
+        app.logger.info(f"Connecting to {ftp_username}@{ftp_server}:{ftp_port}")
+
+        # Get all images
+        image_pattern = os.path.join(IMAGE_DIR, "*_exp*ms.png")
+        image_files = glob.glob(image_pattern)
+
+        if not image_files:
+            return jsonify({
+                "status": "error",
+                "message": "No images found to transfer"
+            }), 404
+
+        print(f"Found {len(image_files)} images to transfer")
+        app.logger.info(f"Found {len(image_files)} images to transfer")
+
+        # Validate connection parameters
+        print(f"Protocol: {protocol.upper()}")
+        print(f"Server: {ftp_server}")
+        print(f"Port: {ftp_port}")
+        print(f"Username: {ftp_username}")
+        print(f"Remote path: {ftp_remote_path}")
+
+        transferred = 0
+        skipped = 0
+        errors = 0
+
+        if protocol == 'sftp':
+            # sFTP transfer using paramiko
+            import paramiko
+
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            try:
+                # Connect to SSH server
+                print(f"Attempting sFTP connection...")
+                ssh.connect(
+                    hostname=ftp_server,
+                    port=ftp_port,
+                    username=ftp_username,
+                    password=ftp_password,
+                    timeout=30,
+                    allow_agent=False,
+                    look_for_keys=False
+                )
+
+                print(f"SSH connected successfully")
+                app.logger.info("Connected to sFTP server successfully")
+
+                # Open SFTP session
+                sftp = ssh.open_sftp()
+
+                # Create remote directory if it doesn't exist
+                try:
+                    sftp.chdir(ftp_remote_path)
+                except IOError:
+                    # Directory doesn't exist, create it
+                    dirs = []
+                    current_path = ftp_remote_path
+                    while current_path and current_path != '/':
+                        dirs.insert(0, current_path)
+                        current_path = os.path.dirname(current_path)
+
+                    for dir_path in dirs:
+                        try:
+                            sftp.stat(dir_path)
+                        except IOError:
+                            sftp.mkdir(dir_path)
+                            print(f"Created remote directory: {dir_path}")
+
+                    sftp.chdir(ftp_remote_path)
+
+                print(f"Changed to remote directory: {ftp_remote_path}")
+                app.logger.info(f"Changed to remote directory: {ftp_remote_path}")
+
+                # Upload files
+                for image_path in image_files:
+                    try:
+                        filename = os.path.basename(image_path)
+
+                        # Check if file already exists on remote
+                        try:
+                            sftp.stat(filename)
+                            print(f"Skipping (already exists): {filename}")
+                            skipped += 1
+                            continue
+                        except IOError:
+                            pass
+
+                        # Upload the file
+                        print(f"Uploading: {filename}")
+                        sftp.put(image_path, filename)
+                        transferred += 1
+
+                    except Exception as e:
+                        print(f"Error transferring {filename}: {str(e)}")
+                        app.logger.error(f"Error transferring {filename}: {str(e)}")
+                        errors += 1
+
+                # Close connections
+                sftp.close()
+                ssh.close()
+
+            finally:
+                try:
+                    sftp.close()
+                except:
+                    pass
+                try:
+                    ssh.close()
+                except:
+                    pass
+
+        else:
+            # Regular FTP transfer
+            from ftplib import FTP
+
+            ftp = None
+            try:
+                print(f"Attempting FTP connection...")
+                ftp = FTP()
+                ftp.connect(ftp_server, ftp_port, timeout=30)
+                ftp.login(ftp_username, ftp_password)
+
+                print(f"FTP connected successfully")
+                app.logger.info("Connected to FTP server successfully")
+
+                # Create and change to remote directory
+                try:
+                    ftp.cwd(ftp_remote_path)
+                except:
+                    # Try to create the directory
+                    dirs = ftp_remote_path.strip('/').split('/')
+                    current = ''
+                    for dir_name in dirs:
+                        current += '/' + dir_name
+                        try:
+                            ftp.cwd(current)
+                        except:
+                            try:
+                                ftp.mkd(current)
+                                ftp.cwd(current)
+                                print(f"Created remote directory: {current}")
+                            except Exception as e:
+                                print(f"Could not create directory {current}: {str(e)}")
+
+                print(f"Changed to remote directory: {ftp_remote_path}")
+                app.logger.info(f"Changed to remote directory: {ftp_remote_path}")
+
+                # Get list of existing files
+                existing_files = []
+                try:
+                    existing_files = ftp.nlst()
+                except:
+                    pass
+
+                # Upload files
+                for image_path in image_files:
+                    try:
+                        filename = os.path.basename(image_path)
+
+                        # Check if file already exists
+                        if filename in existing_files:
+                            print(f"Skipping (already exists): {filename}")
+                            skipped += 1
+                            continue
+
+                        # Upload the file
+                        print(f"Uploading: {filename}")
+                        with open(image_path, 'rb') as f:
+                            ftp.storbinary(f'STOR {filename}', f)
+                        transferred += 1
+
+                    except Exception as e:
+                        print(f"Error transferring {filename}: {str(e)}")
+                        app.logger.error(f"Error transferring {filename}: {str(e)}")
+                        errors += 1
+
+                # Close connection
+                ftp.quit()
+
+            except Exception as e:
+                if ftp:
+                    try:
+                        ftp.quit()
+                    except:
+                        pass
+                raise
+
+        print("="*80)
+        print(f"Transfer complete: {transferred} uploaded, {skipped} skipped, {errors} errors")
+        print("="*80)
+        app.logger.info(f"Transfer complete: {transferred} uploaded, {skipped} skipped, {errors} errors")
+
+        return jsonify({
+            "status": "success",
+            "message": f"Transfer complete: {transferred} uploaded, {skipped} skipped, {errors} errors",
+            "transferred": transferred,
+            "skipped": skipped,
+            "errors": errors
+        })
+
+    except ImportError as e:
+        error_msg = f"Required library not installed: {str(e)}"
+        print(error_msg)
+        app.logger.error(error_msg)
+        return jsonify({
+            "status": "error",
+            "message": error_msg
+        }), 500
+    except Exception as e:
+        error_msg = f"{protocol.upper() if 'protocol' in locals() else 'FTP'} transfer failed: {str(e)}"
+        print(error_msg)
+        app.logger.error(error_msg)
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "status": "error",
+            "message": error_msg
+        }), 500
 def get_cpu_temperature():
     """Get CPU temperature based on the platform."""
     temp = None
@@ -768,6 +1291,26 @@ def api_settings():
                 app_settings['min_exposure_ms'] = max(1, int(data['min_exposure_ms']))
             if 'max_exposure_ms' in data:
                 app_settings['max_exposure_ms'] = max(100, int(data['max_exposure_ms']))
+            if 'capture_daytime' in data:
+                app_settings['capture_daytime'] = bool(data['capture_daytime'])
+            if 'capture_civil_twilight' in data:
+                app_settings['capture_civil_twilight'] = bool(data['capture_civil_twilight'])
+            if 'capture_nautical_twilight' in data:
+                app_settings['capture_nautical_twilight'] = bool(data['capture_nautical_twilight'])
+            if 'capture_astronomical_darkness' in data:
+                app_settings['capture_astronomical_darkness'] = bool(data['capture_astronomical_darkness'])
+            if 'ftp_protocol' in data:
+                app_settings['ftp_protocol'] = data['ftp_protocol']
+            if 'ftp_server' in data:
+                app_settings['ftp_server'] = data['ftp_server']
+            if 'ftp_port' in data:
+                app_settings['ftp_port'] = int(data['ftp_port']) if data['ftp_port'] else 21
+            if 'ftp_username' in data:
+                app_settings['ftp_username'] = data['ftp_username']
+            if 'ftp_password' in data:
+                app_settings['ftp_password'] = data['ftp_password']
+            if 'ftp_remote_path' in data:
+                app_settings['ftp_remote_path'] = data['ftp_remote_path']
 
             # Save configuration to file
             save_config()

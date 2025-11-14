@@ -276,35 +276,68 @@
         function updateCaptureCountdown() {
             const now = Math.floor(Date.now() / 1000);
 
-            // If we don't have lastCaptureTime yet, wait for it
-            if (lastCaptureTime === null) {
-                document.getElementById('countdown-timer').textContent = "--:--:--";
-                document.getElementById('countdown-text').textContent = "waiting for first capture...";
-                setTimeout(updateCaptureCountdown, 1000);
-                return;
-            }
+            // Check if background capture is running
+            fetch('/api/capture_status')
+                .then(response => response.json())
+                .then(statusData => {
+                    // If background capture is not enabled
+                    if (!statusData.background_running) {
+                        document.getElementById('countdown-timer').textContent = "Idle";
+                        document.getElementById('countdown-text').textContent = "background capture not running";
+                        document.getElementById('capture-progress-bar').style.width = "0%";
+                        setTimeout(updateCaptureCountdown, 2000);
+                        return;
+                    }
 
-            // Calculate next capture time if we don't have it
-            if (nextCaptureTime === null) {
-                nextCaptureTime = lastCaptureTime + captureInterval;
-                totalWaitTime = captureInterval;
-            }
+                    // If we don't have lastCaptureTime yet, wait for it
+                    if (lastCaptureTime === null) {
+                        document.getElementById('countdown-timer').textContent = "--:--:--";
+                        document.getElementById('countdown-text').textContent = "waiting for first capture...";
+                        setTimeout(updateCaptureCountdown, 1000);
+                        return;
+                    }
 
-            // Calculate remaining time
+                    // Calculate next capture time if we don't have it
+                    if (nextCaptureTime === null) {
+                        nextCaptureTime = lastCaptureTime + captureInterval;
+                        totalWaitTime = captureInterval;
+                    }
+
+                    // Calculate remaining time
+                    remainingTime = nextCaptureTime - now;
+
+                    if (remainingTime <= 0) {
+                        // Time's up, check if a new image was captured
+                        document.getElementById('countdown-timer').textContent = "Capturing...";
+                        document.getElementById('countdown-text').textContent = "capturing now";
+                        document.getElementById('capture-progress-bar').style.width = "100%";
+
+                        // Check again in 2 seconds
+                        setTimeout(() => {
+                            // Reset and check if we have a new timestamp
+                            checkForNewCapture();
+                        }, 2000);
+
+                        return;
+                    }
+
+                    continueCountdown();
+                })
+                .catch(error => {
+                    console.error("Error checking capture status:", error);
+                    // If there's an error, assume capture is not running
+                    document.getElementById('countdown-timer').textContent = "Idle";
+                    document.getElementById('countdown-text').textContent = "status check failed";
+                    setTimeout(updateCaptureCountdown, 2000);
+                });
+        }
+
+        function continueCountdown() {
+            const now = Math.floor(Date.now() / 1000);
             remainingTime = nextCaptureTime - now;
 
             if (remainingTime <= 0) {
-                // Time's up, check if a new image was captured
-                document.getElementById('countdown-timer').textContent = "Capturing...";
-                document.getElementById('countdown-text').textContent = "capturing now";
-                document.getElementById('capture-progress-bar').style.width = "100%";
-
-                // Check again in 2 seconds
-                setTimeout(() => {
-                    // Reset and check if we have a new timestamp
-                    checkForNewCapture();
-                }, 2000);
-
+                checkForNewCapture();
                 return;
             }
 

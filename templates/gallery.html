@@ -54,33 +54,42 @@
                 </div>
             </div>
 
+            <!-- FTP/sFTP Transfer -->
+            <div class="deletion-controls">
+                <div class="deletion-header">
+                    <h3>FTP/sFTP Transfer</h3>
+                    <button id="sftpTransferButton" class="secondary-button">Transfer All Images</button>
+                </div>
+                <div id="sftpTransferStatus" class="deletion-status" style="margin-top: 10px;"></div>
+            </div>
+
             {% if images %}
             <div class="gallery-by-day">
-                {% set day_groups = {} %}
+                {% set night_groups = {} %}
 
-                <!-- Group images by day -->
+                <!-- Group images by night session -->
                 {% for image in images %}
-                {% set image_day = image.timestamp.split(' ')[0] if image.timestamp else 'Unknown Date' %}
-                {% if image_day not in day_groups %}
-                {% set _ = day_groups.update({image_day: []}) %}
+                {% set night_label = image.night_session_label if image.night_session_label else 'Unknown Date' %}
+                {% if night_label not in night_groups %}
+                {% set _ = night_groups.update({night_label: []}) %}
                 {% endif %}
-                {% set _ = day_groups[image_day].append(image) %}
+                {% set _ = night_groups[night_label].append(image) %}
                 {% endfor %}
 
-                <!-- Display each day as a collapsible section -->
-                {% for day, day_images in day_groups|dictsort(reverse=True) %}
-                <div class="day-section" data-day="{{ day }}" data-image-count="{{ day_images|length }}">
+                <!-- Display each night session as a collapsible section -->
+                {% for night_label, night_images in night_groups|dictsort(reverse=True) %}
+                <div class="day-section" data-day="{{ night_label }}" data-image-count="{{ night_images|length }}">
                     <div class="day-header" onclick="toggleDaySection(this)">
                         <div class="day-header-content">
-                            <input type="checkbox" class="day-checkbox" data-day="{{ day }}" onclick="event.stopPropagation()" style="display: none;">
-                            <h2>{{ day }} <span class="image-count">({{ day_images|length }} images)</span></h2>
+                            <input type="checkbox" class="day-checkbox" data-day="{{ night_label }}" onclick="event.stopPropagation()" style="display: none;">
+                            <h2>{{ night_label }} <span class="image-count">({{ night_images|length }} images)</span></h2>
                         </div>
                         <span class="toggle-icon">▼</span>
                     </div>
 
                     <div class="day-content">
                         <div class="gallery-grid">
-                            {% for image in day_images %}
+                            {% for image in night_images %}
                             <div class="gallery-item" data-filename="{{ image.filename }}"
                                  data-timestamp="{{ image.timestamp or '' }}"
                                  data-exposure="{{ image.exposure_ms or '' }}">
