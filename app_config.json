@@ -1,0 +1,33 @@
+{
+    "settings": {
+        "latitude": 0.00,
+        "longitude": 0.00,
+        "timezone": 0,
+        "dst_enabled": false,
+        "openweather_api_key": "",
+        "min_exposure_ms": 1,
+        "max_exposure_ms": 30000,
+        "capture_daytime": false,
+        "capture_civil_twilight": false,
+        "capture_nautical_twilight": false,
+        "capture_astronomical_darkness": true,
+        "ftp_protocol": "ftp",
+        "ftp_server": "1",
+        "ftp_port": 21,
+        "ftp_username": "",
+        "ftp_password": "",
+        "ftp_remote_path": "",
+        "sftp_server": "",
+        "sftp_port": 22,
+        "sftp_username": "",
+        "sftp_password": "",
+        "sftp_remote_path": ""
+    },
+    "capture_interval": 300,
+    "background_capture_enabled": true,
+    "image_dir": "",
+    "script_path": "",
+    "min_exposure_ms": 1,
+    "max_exposure_ms": 30000,
+    "last_updated": ""
+}

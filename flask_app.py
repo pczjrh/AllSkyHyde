@@ -570,6 +570,127 @@ def serve_image(filename):
     return send_from_directory(IMAGE_DIR, filename)
 
 
+@app.route('/api/latest_image_preview')
+def api_latest_image_preview():
+    """API endpoint optimized for ESP32 displays - serves latest image as resized JPEG"""
+    global background_capture_enabled
+
+    try:
+        from PIL import Image
+        import io
+
+        # Check if background capture is enabled
+        if not background_capture_enabled:
+            return jsonify({"status": "error", "message": "Background capture disabled", "capturing": False}), 503
+
+        # Get the latest image
+        images = get_all_images()
+        if not images:
+            return jsonify({"status": "error", "message": "No images available", "capturing": background_capture_enabled}), 404
+
+        latest_image = images[0]
+        image_path = latest_image['path']
+
+        # Get optional parameters for size (default to 320x480 for ESP32)
+        width = request.args.get('width', 320, type=int)
+        height = request.args.get('height', 480, type=int)
+        quality = request.args.get('quality', 85, type=int)  # JPEG quality 1-100
+        rotate = request.args.get('rotate', 0, type=int)  # Rotation in degrees (0, 90, 180, 270)
+
+        # Open and process the image
+        img = Image.open(image_path)
+
+        # Convert grayscale to RGB for better compatibility
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+
+        # Rotate image if requested (before resizing)
+        if rotate == 90:
+            img = img.rotate(-90, expand=True)
+        elif rotate == 180:
+            img = img.rotate(180, expand=True)
+        elif rotate == 270:
+            img = img.rotate(90, expand=True)
+
+        # Resize maintaining aspect ratio
+        img.thumbnail((width, height), Image.Resampling.LANCZOS)
+
+        # Create a new image with the exact dimensions (add black bars if needed)
+        final_img = Image.new('RGB', (width, height), (0, 0, 0))
+        # Center the thumbnail
+        offset_x = (width - img.width) // 2
+        offset_y = (height - img.height) // 2
+        final_img.paste(img, (offset_x, offset_y))
+
+        # Convert to JPEG in memory
+        img_io = io.BytesIO()
+        final_img.save(img_io, 'JPEG', quality=quality, optimize=True)
+        img_io.seek(0)
+
+        # Return with appropriate headers
+        response = Response(img_io.getvalue(), mimetype='image/jpeg')
+        response.headers['X-Image-Filename'] = latest_image['filename']
+        response.headers['X-Image-Timestamp'] = latest_image['timestamp']
+        response.headers['X-Image-Exposure-Ms'] = str(latest_image['exposure_ms'])
+        response.headers['X-Capturing'] = 'true' if background_capture_enabled else 'false'
+
+        return response
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/weather')
+def api_weather():
+    """API endpoint to get current weather data for ESP32"""
+    try:
+        # Get weather data using the existing function
+        weather_data = {
+            "description": "Not available",
+            "icon": "🌤",
+            "clouds": None,
+            "rain": None,
+            "temperature": None,
+            "humidity": None,
+            "pressure": None,
+            "wind_speed": None,
+            "wind_gust": None
+        }
+
+        if REQUESTS_AVAILABLE and app_settings.get('openweather_api_key') and app_settings['openweather_api_key'].strip():
+            try:
+                api_key = app_settings['openweather_api_key']
+                lat = app_settings.get('latitude', 0)
+                lon = app_settings.get('longitude', 0)
+
+                url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+                response = requests.get(url, timeout=10)
+
+                if response.status_code == 200:
+                    weather_json = response.json()
+
+                    weather_data["description"] = weather_json.get("weather", [{}])[0].get("description", "Unknown").capitalize()
+                    weather_data["temperature"] = weather_json.get("main", {}).get("temp")
+                    weather_data["humidity"] = weather_json.get("main", {}).get("humidity")
+                    weather_data["pressure"] = weather_json.get("main", {}).get("pressure")
+                    weather_data["clouds"] = weather_json.get("clouds", {}).get("all")
+                    weather_data["rain"] = weather_json.get("rain", {}).get("1h", 0)
+                    weather_data["wind_speed"] = weather_json.get("wind", {}).get("speed")
+                    weather_data["wind_gust"] = weather_json.get("wind", {}).get("gust")
+
+                    # Get weather icon code
+                    icon_code = weather_json.get("weather", [{}])[0].get("icon", "01d")
+                    weather_data["icon_code"] = icon_code
+
+            except Exception as e:
+                print(f"Error fetching weather: {e}")
+
+        return jsonify(weather_data)
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/api/images')
 def api_images():
     """API endpoint to get all images as JSON"""
