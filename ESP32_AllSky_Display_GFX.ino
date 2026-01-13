@@ -32,13 +32,26 @@
 #include <ArduinoJson.h>
 #include "WeatherIcons.h"
 
+// Use Arduino_GFX library color constants directly
+// If BLACK is not defined by the library, define it here
+#if !defined(BLACK)
+  #define BLACK 0x0000
+  #define WHITE 0xFFFF
+  #define RED 0xF800
+  #define GREEN 0x07E0
+  #define BLUE 0x001F
+  #define YELLOW 0xFFE0
+  #define MAGENTA 0xF81F
+  #define CYAN 0x07FF
+#endif
+
 // ========== CONFIGURATION ==========
 // WiFi Configuration
 const char* WIFI_SSID = "hyde-home";
 const char* WIFI_PASSWORD = "H0bby1st(__)";
 
 // AllSkyHyde Server Configuration
-const char* ALLSKY_SERVER = "http://192.168.0.137:5000";  // Your kickpi server
+const char* ALLSKY_SERVER = "http://192.168.0.102:5000";  // Your kickpi server
 const char* API_ENDPOINT = "/api/latest_image_preview";
 const char* API_WEATHER_ENDPOINT = "/api/weather";
 

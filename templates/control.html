@@ -186,8 +186,8 @@
 
                     <div class="interval-control">
                         <label for="minExposureInput">Min Exposure (ms):</label>
-                        <input type="number" id="minExposureInput" min="1" max="30000" value="1">
-                        <span class="setting-hint">1-30000 ms</span>
+                        <input type="number" id="minExposureInput" min="0.034" max="30000" step="0.001" value="0.034">
+                        <span class="setting-hint">0.034-30000 ms</span>
                     </div>
 
                     <div class="interval-control">
@@ -220,7 +220,7 @@
                     <div class="capture-controls">
                         <div class="exposure-settings">
                             <label for="exposureTime">Exposure Time (ms):</label>
-                            <input type="number" id="exposureTime" min="1" max="30000" value="1000">
+                            <input type="number" id="exposureTime" min="0.034" max="30000" step="0.001" value="1000">
                         </div>
                         
                         <div class="capture-buttons">
@@ -685,7 +685,7 @@
                 timezone: timezone ? parseFloat(timezone) : null,
                 dst_enabled: dstEnabled,
                 openweather_api_key: openweatherApiKey || null,
-                min_exposure_ms: minExposure ? parseInt(minExposure) : 1,
+                min_exposure_ms: minExposure ? parseFloat(minExposure) : 0.034,
                 max_exposure_ms: maxExposure ? parseInt(maxExposure) : 30000,
                 capture_daytime: captureDaytime,
                 capture_civil_twilight: captureCivilTwilight,

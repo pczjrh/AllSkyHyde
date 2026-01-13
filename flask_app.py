@@ -11,6 +11,7 @@ import time
 import shutil
 import psutil
 import platform
+import socket
 
 # Import requests for weather API - make it optional in case it's not installed
 try:
@@ -45,7 +46,7 @@ app_settings = {
     "timezone": None,
     "dst_enabled": False,
     "openweather_api_key": None,
-    "min_exposure_ms": 1,
+    "min_exposure_ms": 0.034,
     "max_exposure_ms": 30000,
     "capture_daytime": False,
     "capture_civil_twilight": False,
@@ -121,7 +122,7 @@ def save_config():
             "background_capture_enabled": background_capture_enabled,
             "image_dir": IMAGE_DIR,
             "script_path": SCRIPT_PATH,
-            "min_exposure_ms": app_settings.get("min_exposure_ms", 1),
+            "min_exposure_ms": app_settings.get("min_exposure_ms", 0.034),
             "max_exposure_ms": app_settings.get("max_exposure_ms", 30000),
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -846,17 +847,14 @@ def api_delete_images():
             if image['filename'] == latest_image_filename:
                 continue
 
-            # Extract the day from the image timestamp
-            if image['timestamp']:
-                image_day = image['timestamp'].split(' ')[0]
-            else:
-                image_day = 'Unknown Date'
+            # Get the night session label for this image (e.g., "Night of 2026-01-13 to 2026-01-14")
+            image_night_label = image.get('night_session_label', 'Unknown Date')
 
-            # If this image's day is in the deletion list, mark it for deletion
-            if image_day in days_to_delete:
+            # If this image's night session is in the deletion list, mark it for deletion
+            if image_night_label in days_to_delete:
                 images_to_delete.append(image)
-                if image_day not in deleted_days:
-                    deleted_days.append(image_day)
+                if image_night_label not in deleted_days:
+                    deleted_days.append(image_night_label)
 
         # Delete the images
         deleted_count = 0
@@ -1154,25 +1152,54 @@ def sftp_transfer_images():
 
         if protocol == 'sftp':
             # sFTP transfer using paramiko
-            import paramiko
+            try:
+                import paramiko
+            except ImportError as e:
+                error_msg = "paramiko library not installed. Install with: pip install paramiko"
+                print(f"ERROR: {error_msg}")
+                app.logger.error(error_msg)
+                return jsonify({"status": "error", "message": error_msg}), 500
 
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
             try:
                 # Connect to SSH server
-                print(f"Attempting sFTP connection...")
-                ssh.connect(
-                    hostname=ftp_server,
-                    port=ftp_port,
-                    username=ftp_username,
-                    password=ftp_password,
-                    timeout=30,
-                    allow_agent=False,
-                    look_for_keys=False
-                )
+                print(f"Attempting sFTP connection to {ftp_server}:{ftp_port}...")
+                app.logger.info(f"Attempting sFTP connection to {ftp_server}:{ftp_port}...")
 
-                print(f"SSH connected successfully")
+                try:
+                    ssh.connect(
+                        hostname=ftp_server,
+                        port=ftp_port,
+                        username=ftp_username,
+                        password=ftp_password,
+                        timeout=30,
+                        allow_agent=False,
+                        look_for_keys=False
+                    )
+                except paramiko.AuthenticationException as e:
+                    error_msg = f"Authentication failed: Invalid username or password for {ftp_username}@{ftp_server}"
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(error_msg)
+                    return jsonify({"status": "error", "message": error_msg}), 401
+                except paramiko.SSHException as e:
+                    error_msg = f"SSH error: {str(e)}"
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(error_msg)
+                    return jsonify({"status": "error", "message": error_msg}), 500
+                except socket.error as e:
+                    error_msg = f"Network error connecting to {ftp_server}:{ftp_port} - {str(e)}. Check server address and port."
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(error_msg)
+                    return jsonify({"status": "error", "message": error_msg}), 500
+                except Exception as e:
+                    error_msg = f"Connection failed: {str(e)}"
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(error_msg)
+                    return jsonify({"status": "error", "message": error_msg}), 500
+
+                print(f"✓ SSH connected successfully")
                 app.logger.info("Connected to sFTP server successfully")
 
                 # Open SFTP session
@@ -1241,39 +1268,94 @@ def sftp_transfer_images():
 
         else:
             # Regular FTP transfer
-            from ftplib import FTP
+            from ftplib import FTP, error_perm
 
             ftp = None
             try:
-                print(f"Attempting FTP connection...")
-                ftp = FTP()
-                ftp.connect(ftp_server, ftp_port, timeout=30)
-                ftp.login(ftp_username, ftp_password)
+                print(f"Attempting FTP connection to {ftp_server}:{ftp_port}...")
+                app.logger.info(f"Attempting FTP connection to {ftp_server}:{ftp_port}...")
 
-                print(f"FTP connected successfully")
+                ftp = FTP()
+
+                try:
+                    ftp.connect(ftp_server, ftp_port, timeout=30)
+                    print(f"✓ FTP connection established")
+                    app.logger.info(f"FTP connection established to {ftp_server}:{ftp_port}")
+                except socket.gaierror as e:
+                    error_msg = f"DNS lookup failed for {ftp_server}. Check server address."
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(f"{error_msg} - {str(e)}")
+                    return jsonify({"status": "error", "message": error_msg}), 500
+                except socket.timeout as e:
+                    error_msg = f"Connection timeout to {ftp_server}:{ftp_port}. Check if server is reachable and port is correct."
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(f"{error_msg} - {str(e)}")
+                    return jsonify({"status": "error", "message": error_msg}), 500
+                except socket.error as e:
+                    error_msg = f"Network error connecting to {ftp_server}:{ftp_port} - {str(e)}"
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(error_msg)
+                    return jsonify({"status": "error", "message": error_msg}), 500
+                except Exception as e:
+                    error_msg = f"FTP connection failed: {str(e)}"
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(error_msg)
+                    return jsonify({"status": "error", "message": error_msg}), 500
+
+                try:
+                    ftp.login(ftp_username, ftp_password)
+                    print(f"✓ FTP login successful as {ftp_username}")
+                    app.logger.info(f"FTP login successful as {ftp_username}")
+                except error_perm as e:
+                    error_msg = f"Authentication failed: Invalid username or password for {ftp_username}"
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(f"{error_msg} - {str(e)}")
+                    return jsonify({"status": "error", "message": error_msg}), 401
+                except Exception as e:
+                    error_msg = f"FTP login failed: {str(e)}"
+                    print(f"ERROR: {error_msg}")
+                    app.logger.error(error_msg)
+                    return jsonify({"status": "error", "message": error_msg}), 500
+
+                print(f"✓ FTP connected successfully")
                 app.logger.info("Connected to FTP server successfully")
 
                 # Create and change to remote directory
                 try:
                     ftp.cwd(ftp_remote_path)
-                except:
-                    # Try to create the directory
+                    print(f"✓ Changed to remote directory: {ftp_remote_path}")
+                    app.logger.info(f"Changed to remote directory: {ftp_remote_path}")
+                except error_perm as e:
+                    # Directory doesn't exist, try to create it
+                    print(f"Directory {ftp_remote_path} doesn't exist, creating...")
+                    app.logger.info(f"Directory {ftp_remote_path} doesn't exist, creating...")
+
                     dirs = ftp_remote_path.strip('/').split('/')
                     current = ''
                     for dir_name in dirs:
                         current += '/' + dir_name
                         try:
                             ftp.cwd(current)
-                        except:
+                            print(f"  ✓ Directory exists: {current}")
+                        except error_perm:
                             try:
                                 ftp.mkd(current)
                                 ftp.cwd(current)
-                                print(f"Created remote directory: {current}")
+                                print(f"  ✓ Created remote directory: {current}")
+                                app.logger.info(f"Created remote directory: {current}")
+                            except error_perm as e:
+                                error_msg = f"Permission denied: Cannot create directory {current}. Check FTP user permissions."
+                                print(f"ERROR: {error_msg}")
+                                app.logger.error(f"{error_msg} - {str(e)}")
+                                return jsonify({"status": "error", "message": error_msg}), 403
                             except Exception as e:
-                                print(f"Could not create directory {current}: {str(e)}")
+                                error_msg = f"Could not create directory {current}: {str(e)}"
+                                print(f"ERROR: {error_msg}")
+                                app.logger.error(error_msg)
+                                return jsonify({"status": "error", "message": error_msg}), 500
 
-                print(f"Changed to remote directory: {ftp_remote_path}")
-                app.logger.info(f"Changed to remote directory: {ftp_remote_path}")
+                    print(f"✓ Successfully created and changed to: {ftp_remote_path}")
+                    app.logger.info(f"Successfully created and changed to: {ftp_remote_path}")
 
                 # Get list of existing files
                 existing_files = []
@@ -1409,7 +1491,7 @@ def api_settings():
             if 'openweather_api_key' in data:
                 app_settings['openweather_api_key'] = data['openweather_api_key']
             if 'min_exposure_ms' in data:
-                app_settings['min_exposure_ms'] = max(1, int(data['min_exposure_ms']))
+                app_settings['min_exposure_ms'] = max(0.034, float(data['min_exposure_ms']))
             if 'max_exposure_ms' in data:
                 app_settings['max_exposure_ms'] = max(100, int(data['max_exposure_ms']))
             if 'capture_daytime' in data:
