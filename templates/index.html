@@ -26,7 +26,7 @@
                     <div class="index-main">
                         <div class="image-container">
                             <div class="image-wrapper" id="imageWrapper">
-                                <img id="zoomableImage" src="{{ url_for('serve_image', filename=latest_image.filename) }}"
+                                <img id="zoomableImage" src="{{ url_for('serve_image', filename=latest_image.filename) }}?t={{ latest_image.modified.timestamp() }}"
                                      alt="Latest ZWO Image" data-filename="{{ latest_image.filename }}">
                             </div>
 
@@ -400,12 +400,8 @@
                         lastCaptureTime = newCaptureTime;
                         nextCaptureTime = null;  // This will recalculate the next capture time
 
-                        // Also reload the image
-                        const mainImage = document.querySelector('.main-image img');
-                        if (mainImage) {
-                            const originalSrc = mainImage.src.split('?')[0];
-                            mainImage.src = originalSrc + '?t=' + Date.now();
-                        }
+                        // Also reload the image and page to show the latest capture
+                        location.reload();
                     }
 
                     // Continue the countdown

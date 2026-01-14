@@ -160,10 +160,16 @@ def extract_metadata_from_filename(filename):
         except ValueError:
             pass
 
-    # Extract exposure time
+    # Extract exposure time (handle both milliseconds and microseconds)
     exposure_match = re.search(r'exp(\d+)ms', filename)
     if exposure_match:
         metadata["exposure_ms"] = int(exposure_match.group(1))
+    else:
+        # Try microseconds format
+        exposure_match = re.search(r'exp(\d+)us', filename)
+        if exposure_match:
+            # Convert microseconds to milliseconds
+            metadata["exposure_ms"] = int(exposure_match.group(1)) / 1000.0
 
     return metadata
 
@@ -197,9 +203,10 @@ def get_night_session_for_image(image_datetime):
 
 def get_all_images():
     """Get all ZWO images with metadata, sorted by date (newest first)"""
-    # Match files with pattern: YYYYMMDD_HHMMSS_expXXXms.png
-    image_pattern = os.path.join(IMAGE_DIR, "*_exp*ms.png")
-    image_files = glob.glob(image_pattern)
+    # Match files with pattern: YYYYMMDD_HHMMSS_expXXXms.png or YYYYMMDD_HHMMSS_expXXXus.png
+    image_files = []
+    image_files.extend(glob.glob(os.path.join(IMAGE_DIR, "*_exp*ms.png")))
+    image_files.extend(glob.glob(os.path.join(IMAGE_DIR, "*_exp*us.png")))
 
     images = []
     for img_path in image_files:
@@ -476,7 +483,7 @@ def index():
     """Main page showing the latest image with zoom/pan functionality"""
     images = get_all_images()
     latest_image = images[0] if images else None
-    
+
     # Add the timestamp of the last capture for the countdown
     last_capture_timestamp = None
     if latest_image and 'timestamp' in latest_image:
@@ -485,14 +492,21 @@ def index():
             last_capture_timestamp = int(dt.timestamp())
         except (ValueError, TypeError):
             pass
-    
+
     # NOTE: Removed run_capture_script() call from here!
-    
-    return render_template('index.html',
+
+    response = app.make_response(render_template('index.html',
                            latest_image=latest_image,
                            capture_interval=capture_interval,
                            last_capture_timestamp=last_capture_timestamp,
-                           background_running=background_capture_enabled)
+                           background_running=background_capture_enabled))
+
+    # Add cache control headers to prevent browser caching
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+
+    return response
 
 
 @app.route('/api/last_capture_time')
@@ -568,7 +582,12 @@ def control_panel():
 @app.route('/images/<path:filename>')
 def serve_image(filename):
     """Serve the images from the IMAGE_DIR directory"""
-    return send_from_directory(IMAGE_DIR, filename)
+    response = send_from_directory(IMAGE_DIR, filename)
+    # Add cache control headers to prevent browser caching
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/api/latest_image_preview')
@@ -1126,9 +1145,10 @@ def sftp_transfer_images():
         print(f"Connecting to {ftp_username}@{ftp_server}:{ftp_port}")
         app.logger.info(f"Connecting to {ftp_username}@{ftp_server}:{ftp_port}")
 
-        # Get all images
-        image_pattern = os.path.join(IMAGE_DIR, "*_exp*ms.png")
-        image_files = glob.glob(image_pattern)
+        # Get all images (both ms and us formats)
+        image_files = []
+        image_files.extend(glob.glob(os.path.join(IMAGE_DIR, "*_exp*ms.png")))
+        image_files.extend(glob.glob(os.path.join(IMAGE_DIR, "*_exp*us.png")))
 
         if not image_files:
             return jsonify({
