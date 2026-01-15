@@ -114,6 +114,226 @@ sudo systemctl disable allskyhyde
 sudo systemctl enable allskyhyde
 ```
 
+## Automatic Service Restart Configuration
+
+The AllSkyHyde service is configured to automatically restart if it crashes or stops unexpectedly. This section explains how to set up and configure this behaviour.
+
+### Understanding the Restart Settings
+
+The systemd service file includes these restart-related settings:
+
+| Setting | Value | What it Does |
+|---------|-------|--------------|
+| `Restart=always` | always | Restarts the service whenever it stops (crash or clean exit) |
+| `RestartSec=10` | 10 seconds | Waits 10 seconds before attempting to restart |
+| `StartLimitBurst=5` | 5 attempts | Maximum number of restart attempts allowed |
+| `StartLimitIntervalSec=300` | 5 minutes | Time window for the restart limit |
+
+### How It Works
+
+1. **If the service crashes**: systemd waits 10 seconds, then restarts it automatically
+2. **If it crashes repeatedly**: After 5 restarts within 5 minutes, systemd stops trying (prevents infinite loops)
+
+### Setting Up Automatic Restart (Step-by-Step)
+
+If your service file doesn't have these settings, follow these steps:
+
+#### Step 1: Open the Service File for Editing
+
+```bash
+sudo nano /etc/systemd/system/allskyhyde.service
+```
+
+You will be prompted for your password. Type it and press Enter.
+
+#### Step 2: Edit the Service File
+
+Replace the entire contents with this configuration (adjust paths if your username is different):
+
+```ini
+[Unit]
+Description=AllSkyHyde Web Application
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=kickpi
+Group=kickpi
+WorkingDirectory=/home/kickpi/AllSkyCode
+Environment=PATH=/home/kickpi/AllSkyCode/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Gunicorn configuration
+ExecStart=/home/kickpi/AllSkyCode/venv/bin/gunicorn --bind 0.0.0.0:5000 --workers 1 --threads 4 --timeout 120 --access-logfile /home/kickpi/AllSkyCode/gunicorn-access.log --error-logfile /home/kickpi/AllSkyCode/gunicorn-error.log --log-level info flask_app:app
+
+# Restart configuration
+Restart=always
+RestartSec=10
+
+# Security settings
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Important:** Change `kickpi` to your actual username and `/home/kickpi/AllSkyCode` to your actual installation path.
+
+#### Step 3: Save and Exit
+
+- Press `Ctrl + O` (letter O) to save
+- Press `Enter` to confirm the filename
+- Press `Ctrl + X` to exit the editor
+
+#### Step 4: Reload systemd Configuration
+
+After editing the service file, tell systemd to reload its configuration:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+#### Step 5: Restart the Service
+
+```bash
+sudo systemctl restart allskyhyde
+```
+
+#### Step 6: Verify the Settings
+
+Check that the restart settings are applied:
+
+```bash
+systemctl show allskyhyde.service | grep -E "Restart=|RestartUSec|StartLimit"
+```
+
+You should see output like:
+```
+Restart=always
+RestartUSec=10s
+StartLimitIntervalSec=5min
+StartLimitBurst=5
+```
+
+### Testing Automatic Restart
+
+To test that automatic restart is working:
+
+```bash
+# Find the process ID
+sudo systemctl status allskyhyde | grep "Main PID"
+
+# Kill the process (simulates a crash)
+sudo kill -9 <PID>
+
+# Wait 15 seconds, then check status
+sleep 15
+sudo systemctl status allskyhyde
+```
+
+The service should show as "active (running)" with a new PID.
+
+### Viewing Restart History
+
+To see if the service has restarted recently:
+
+```bash
+sudo journalctl -u allskyhyde --since "1 hour ago" | grep -E "Started|Stopped|Starting"
+```
+
+## Network Stay-Alive Monitor
+
+AllSkyHyde includes a built-in network monitoring feature that automatically detects network disconnections and attempts to recover connectivity.
+
+### How It Works
+
+1. **Regular Connectivity Checks**: Every 60 seconds (configurable), the system pings Google's DNS server (8.8.8.8)
+2. **Connection Loss Detection**: If the ping fails, the system knows the network is down
+3. **Reconnection Attempts**: The system tries to restart network interfaces (up to 3 attempts)
+4. **Automatic Reboot**: If reconnection fails, the system reboots to restore connectivity
+5. **Rate Limiting**: Maximum 5 reboots per hour to prevent endless reboot loops
+6. **Automatic Recovery**: When connection is restored, all counters reset
+
+### Configuration Constants
+
+These values are defined at the top of `flask_app.py`:
+
+```python
+STAY_ALIVE_PING_HOST = "8.8.8.8"              # Host to ping (Google DNS)
+STAY_ALIVE_PING_PORT = 53                      # Port to connect to
+STAY_ALIVE_CHECK_INTERVAL_SECONDS = 60         # How often to check (seconds)
+STAY_ALIVE_MAX_REBOOT_ATTEMPTS = 5             # Max reboots per tracking period
+STAY_ALIVE_TRACKING_PERIOD_SECONDS = 3600      # Tracking period (1 hour)
+STAY_ALIVE_CONNECTION_TIMEOUT_SECONDS = 10     # Connection timeout
+STAY_ALIVE_RETRY_DELAY_SECONDS = 30            # Delay between reconnection attempts
+STAY_ALIVE_MAX_RECONNECT_ATTEMPTS = 3          # Reconnection attempts before reboot
+```
+
+### Viewing Network Status
+
+#### Via Web Interface
+
+Navigate to **System Status** page - the Network Monitor card shows:
+- Current connection status (Connected/Degraded/Disconnected)
+- Last successful ping time
+- Number of reboot attempts in the current hour
+- Recent activity log
+
+#### Via API
+
+```bash
+curl http://localhost:5000/api/stay_alive/status
+```
+
+Returns JSON with all status information.
+
+#### Via Command Line (Remote)
+
+```bash
+ssh kickpi@192.168.0.102 "curl -s http://localhost:5000/api/stay_alive/status | python3 -m json.tool"
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/stay_alive/status` | GET | Get current monitor status and statistics |
+| `/api/stay_alive/start` | POST | Start the network monitor |
+| `/api/stay_alive/stop` | POST | Stop the network monitor |
+| `/api/stay_alive/test_connection` | GET | Test network connectivity now |
+| `/api/stay_alive/logs` | GET | Get all stay-alive log entries |
+
+### Customising the Configuration
+
+To change the stay-alive settings, edit `flask_app.py`:
+
+```bash
+nano ~/AllSkyCode/flask_app.py
+```
+
+Find the section starting with `# ==================== STAY-ALIVE CONSTANTS ====================` and modify the values.
+
+After making changes, restart the service:
+
+```bash
+sudo systemctl restart allskyhyde
+```
+
+### Disabling the Stay-Alive Monitor
+
+To disable the network monitor, you can either:
+
+1. **Via API** (temporary - until next restart):
+   ```bash
+   curl -X POST http://localhost:5000/api/stay_alive/stop
+   ```
+
+2. **Permanently**: Edit `flask_app.py` and change:
+   ```python
+   stay_alive_enabled = False  # Change from True to False
+   ```
+
 ## Log Files
 
 The application creates two log files in the installation directory:
