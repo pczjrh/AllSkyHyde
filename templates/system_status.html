@@ -174,6 +174,76 @@
             margin-top: 10px;
             text-align: center;
         }
+
+        /* Network status styles */
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .status-online {
+            background-color: #4caf50;
+            box-shadow: 0 0 8px #4caf50;
+        }
+
+        .status-offline {
+            background-color: #f44336;
+            box-shadow: 0 0 8px #f44336;
+        }
+
+        .status-warning {
+            background-color: #ff9800;
+            box-shadow: 0 0 8px #ff9800;
+        }
+
+        .network-log {
+            background-color: #1a1a1a;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85em;
+            max-height: 150px;
+            overflow-y: auto;
+            padding: 10px;
+            margin-top: 10px;
+        }
+
+        .network-log-entry {
+            color: #aaa;
+            margin: 2px 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .network-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .network-stat {
+            text-align: center;
+            padding: 10px;
+            background-color: #1a1a1a;
+            border-radius: 4px;
+        }
+
+        .network-stat-value {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #4caf50;
+        }
+
+        .network-stat-label {
+            font-size: 0.85em;
+            color: #888;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -297,7 +367,45 @@
                     </div>
                 </div>
             </div>
-            
+
+            <!-- Network Monitor Card -->
+            <div class="status-card">
+                <div class="status-header">
+                    <h2>Network Monitor</h2>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Connection Status</div>
+                    <div class="status-value">
+                        <span id="network-indicator" class="status-indicator status-offline"></span>
+                        <span id="network-status-text">Checking...</span>
+                    </div>
+                </div>
+                <div class="network-stats">
+                    <div class="network-stat">
+                        <div id="last-ping" class="network-stat-value">--</div>
+                        <div class="network-stat-label">Last Ping</div>
+                    </div>
+                    <div class="network-stat">
+                        <div id="reboot-attempts" class="network-stat-value">0/5</div>
+                        <div class="network-stat-label">Reboots (1hr)</div>
+                    </div>
+                    <div class="network-stat">
+                        <div id="monitor-status" class="network-stat-value">--</div>
+                        <div class="network-stat-label">Monitor</div>
+                    </div>
+                    <div class="network-stat">
+                        <div id="ping-host" class="network-stat-value">--</div>
+                        <div class="network-stat-label">Ping Host</div>
+                    </div>
+                </div>
+                <div class="status-item" style="margin-top: 15px;">
+                    <div class="status-label">Recent Activity</div>
+                    <div id="network-log" class="network-log">
+                        <div class="network-log-entry">Loading...</div>
+                    </div>
+                </div>
+            </div>
+
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px;">
                 <button class="refresh-button" onclick="location.reload()">Refresh Status</button>
                 <button class="restart-button" onclick="confirmRestart()">Restart System</button>
@@ -423,6 +531,97 @@
                 closeDialog('shutdownDialog');
             }
         });
+
+        // Network Monitor functions
+        function updateNetworkStatus() {
+            fetch('/api/stay_alive/status')
+                .then(response => response.json())
+                .then(data => {
+                    const indicator = document.getElementById('network-indicator');
+                    const statusText = document.getElementById('network-status-text');
+                    const lastPing = document.getElementById('last-ping');
+                    const rebootAttempts = document.getElementById('reboot-attempts');
+                    const monitorStatus = document.getElementById('monitor-status');
+                    const pingHost = document.getElementById('ping-host');
+                    const networkLog = document.getElementById('network-log');
+
+                    // Update connection indicator based on last ping
+                    if (data.last_successful_ping) {
+                        const lastPingDate = new Date(data.last_successful_ping);
+                        const now = new Date();
+                        const secondsAgo = Math.floor((now - lastPingDate) / 1000);
+
+                        if (secondsAgo < data.check_interval_seconds * 2) {
+                            indicator.className = 'status-indicator status-online';
+                            statusText.textContent = 'Connected';
+                        } else if (secondsAgo < data.check_interval_seconds * 5) {
+                            indicator.className = 'status-indicator status-warning';
+                            statusText.textContent = 'Degraded';
+                        } else {
+                            indicator.className = 'status-indicator status-offline';
+                            statusText.textContent = 'Disconnected';
+                        }
+
+                        // Format last ping time
+                        if (secondsAgo < 60) {
+                            lastPing.textContent = secondsAgo + 's ago';
+                        } else if (secondsAgo < 3600) {
+                            lastPing.textContent = Math.floor(secondsAgo / 60) + 'm ago';
+                        } else {
+                            lastPing.textContent = lastPingDate.toLocaleTimeString();
+                        }
+                    } else {
+                        indicator.className = 'status-indicator status-offline';
+                        statusText.textContent = 'No data';
+                        lastPing.textContent = '--';
+                    }
+
+                    // Update reboot attempts
+                    rebootAttempts.textContent = data.reboot_attempts_in_period + '/' + data.max_reboot_attempts;
+                    if (data.reboot_attempts_in_period >= data.max_reboot_attempts) {
+                        rebootAttempts.style.color = '#f44336';
+                    } else if (data.reboot_attempts_in_period > 0) {
+                        rebootAttempts.style.color = '#ff9800';
+                    } else {
+                        rebootAttempts.style.color = '#4caf50';
+                    }
+
+                    // Update monitor status
+                    monitorStatus.textContent = data.running ? 'Active' : 'Stopped';
+                    monitorStatus.style.color = data.running ? '#4caf50' : '#f44336';
+
+                    // Update ping host (show just the IP)
+                    if (data.ping_host) {
+                        pingHost.textContent = data.ping_host.split(':')[0];
+                    }
+
+                    // Update log
+                    if (data.log && data.log.length > 0) {
+                        networkLog.innerHTML = data.log
+                            .slice(-10)
+                            .reverse()
+                            .map(entry => '<div class="network-log-entry">' + escapeHtml(entry) + '</div>')
+                            .join('');
+                    } else {
+                        networkLog.innerHTML = '<div class="network-log-entry">No recent activity</div>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching network status:', error);
+                    document.getElementById('network-indicator').className = 'status-indicator status-offline';
+                    document.getElementById('network-status-text').textContent = 'Error';
+                });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initial load and periodic update
+        updateNetworkStatus();
+        setInterval(updateNetworkStatus, 10000);  // Update every 10 seconds
     </script>
 </body>
 </html>

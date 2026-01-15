@@ -39,6 +39,24 @@ stop_capture_flag = False
 last_capture_time = None
 background_capture_enabled = False  # Track if background capture should be running
 
+# ==================== STAY-ALIVE CONSTANTS ====================
+STAY_ALIVE_PING_HOST = "8.8.8.8"  # Google DNS - reliable host to ping
+STAY_ALIVE_PING_PORT = 53  # DNS port
+STAY_ALIVE_CHECK_INTERVAL_SECONDS = 600  # Check connectivity every 60 seconds
+STAY_ALIVE_MAX_REBOOT_ATTEMPTS = 5  # Max reboot attempts per tracking period
+STAY_ALIVE_TRACKING_PERIOD_SECONDS = 3600  # 1 hour tracking period
+STAY_ALIVE_CONNECTION_TIMEOUT_SECONDS = 10  # Timeout for connection test
+STAY_ALIVE_RETRY_DELAY_SECONDS = 30  # Delay between reconnection attempts before reboot
+STAY_ALIVE_MAX_RECONNECT_ATTEMPTS = 3  # Number of reconnection attempts before reboot
+
+# Global variables for stay-alive feature
+stay_alive_thread = None
+stay_alive_stop_flag = False
+stay_alive_log = []
+stay_alive_reboot_attempts = []  # List of timestamps of reboot attempts
+stay_alive_last_successful_ping = None
+stay_alive_enabled = True  # Enable stay-alive by default
+
 # Global settings storage
 app_settings = {
     "latitude": None,
@@ -476,6 +494,341 @@ def stop_background_capture():
     save_config()
 
     return True, "Background capture stopped"
+
+
+# ==================== STAY-ALIVE FUNCTIONS ====================
+
+def stay_alive_log_message(message):
+    """Add a timestamped message to the stay-alive log"""
+    global stay_alive_log
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_entry = f"[{timestamp}] {message}"
+    stay_alive_log.append(log_entry)
+    # Keep only the last 100 log entries
+    if len(stay_alive_log) > 100:
+        stay_alive_log = stay_alive_log[-100:]
+    print(f"STAY-ALIVE: {message}")
+
+
+def check_network_connectivity():
+    """
+    Check if network connectivity is available by attempting to connect to a known host.
+    Returns True if connected, False otherwise.
+    """
+    global stay_alive_last_successful_ping
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(STAY_ALIVE_CONNECTION_TIMEOUT_SECONDS)
+        result = sock.connect_ex((STAY_ALIVE_PING_HOST, STAY_ALIVE_PING_PORT))
+        sock.close()
+
+        if result == 0:
+            stay_alive_last_successful_ping = datetime.now()
+            return True
+        return False
+    except socket.error as e:
+        stay_alive_log_message(f"Socket error during connectivity check: {str(e)}")
+        return False
+    except Exception as e:
+        stay_alive_log_message(f"Unexpected error during connectivity check: {str(e)}")
+        return False
+
+
+def get_reboot_attempts_in_tracking_period():
+    """
+    Get the number of reboot attempts within the current tracking period.
+    Also cleans up old entries outside the tracking period.
+    """
+    global stay_alive_reboot_attempts
+
+    current_time = datetime.now()
+    cutoff_time = current_time - timedelta(seconds=STAY_ALIVE_TRACKING_PERIOD_SECONDS)
+
+    # Filter out old attempts and keep only those within the tracking period
+    stay_alive_reboot_attempts = [
+        timestamp for timestamp in stay_alive_reboot_attempts
+        if timestamp > cutoff_time
+    ]
+
+    return len(stay_alive_reboot_attempts)
+
+
+def record_reboot_attempt():
+    """Record a reboot attempt with the current timestamp"""
+    global stay_alive_reboot_attempts
+    stay_alive_reboot_attempts.append(datetime.now())
+
+
+def get_time_until_next_tracking_period():
+    """
+    Calculate how long until the next tracking period starts.
+    Returns seconds until the oldest attempt expires from the tracking window.
+    """
+    global stay_alive_reboot_attempts
+
+    if not stay_alive_reboot_attempts:
+        return 0
+
+    oldest_attempt = min(stay_alive_reboot_attempts)
+    time_elapsed = (datetime.now() - oldest_attempt).total_seconds()
+    time_remaining = STAY_ALIVE_TRACKING_PERIOD_SECONDS - time_elapsed
+
+    return max(0, time_remaining)
+
+
+def attempt_network_reconnection():
+    """
+    Attempt to reconnect to the network using various methods.
+    Returns True if reconnection succeeded, False otherwise.
+    """
+    stay_alive_log_message("Attempting network reconnection...")
+
+    # Try different reconnection methods based on the platform
+    reconnection_commands = []
+
+    if platform.system() == "Linux":
+        # Linux-specific network restart commands
+        reconnection_commands = [
+            # Try systemd network restart
+            ["sudo", "systemctl", "restart", "NetworkManager"],
+            # Alternative: restart networking service
+            ["sudo", "systemctl", "restart", "networking"],
+            # Try bringing interface down and up (common on embedded systems)
+            ["sudo", "ip", "link", "set", "eth0", "down"],
+            ["sudo", "ip", "link", "set", "eth0", "up"],
+            # Also try wlan0 for WiFi
+            ["sudo", "ip", "link", "set", "wlan0", "down"],
+            ["sudo", "ip", "link", "set", "wlan0", "up"],
+            # Try dhclient to renew IP
+            ["sudo", "dhclient", "-r"],
+            ["sudo", "dhclient"],
+        ]
+    elif platform.system() == "Windows":
+        reconnection_commands = [
+            ["netsh", "interface", "set", "interface", "Ethernet", "disable"],
+            ["netsh", "interface", "set", "interface", "Ethernet", "enable"],
+            ["ipconfig", "/release"],
+            ["ipconfig", "/renew"],
+        ]
+
+    for cmd in reconnection_commands:
+        try:
+            stay_alive_log_message(f"Running: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                stay_alive_log_message(f"Command succeeded: {' '.join(cmd)}")
+            else:
+                stay_alive_log_message(f"Command failed (code {result.returncode}): {result.stderr}")
+        except subprocess.TimeoutExpired:
+            stay_alive_log_message(f"Command timed out: {' '.join(cmd)}")
+        except Exception as e:
+            stay_alive_log_message(f"Error running command: {str(e)}")
+
+        # Wait briefly between commands
+        time.sleep(2)
+
+    # Wait a bit for network to stabilize
+    time.sleep(5)
+
+    # Check if reconnection was successful
+    if check_network_connectivity():
+        stay_alive_log_message("Network reconnection successful!")
+        return True
+
+    stay_alive_log_message("Network reconnection failed")
+    return False
+
+
+def perform_system_reboot():
+    """
+    Perform a system reboot to attempt to restore network connectivity.
+    Records the reboot attempt before initiating.
+    """
+    record_reboot_attempt()
+    stay_alive_log_message("INITIATING SYSTEM REBOOT...")
+
+    # Save any configuration before reboot
+    try:
+        save_config()
+    except Exception as e:
+        stay_alive_log_message(f"Failed to save config before reboot: {str(e)}")
+
+    # Give a moment for logs to be written
+    time.sleep(2)
+
+    try:
+        if platform.system() == "Linux":
+            # Use sudo reboot on Linux
+            subprocess.run(["sudo", "reboot"], check=True)
+        elif platform.system() == "Windows":
+            # Use shutdown command on Windows
+            subprocess.run(["shutdown", "/r", "/t", "5", "/c", "AllSky stay-alive reboot"], check=True)
+        else:
+            stay_alive_log_message(f"Unsupported platform for reboot: {platform.system()}")
+    except Exception as e:
+        stay_alive_log_message(f"Failed to initiate reboot: {str(e)}")
+
+
+def reset_stay_alive_tracking():
+    """Reset all stay-alive tracking data after successful reconnection"""
+    global stay_alive_reboot_attempts, stay_alive_last_successful_ping
+    stay_alive_reboot_attempts = []
+    stay_alive_last_successful_ping = datetime.now()
+    stay_alive_log_message("Stay-alive tracking reset after successful connection")
+
+
+def stay_alive_monitor_loop():
+    """
+    Background thread that monitors network connectivity and takes action if connection is lost.
+    """
+    global stay_alive_stop_flag, stay_alive_last_successful_ping
+
+    stay_alive_log_message("Stay-alive monitor started")
+    stay_alive_log_message(f"Ping host: {STAY_ALIVE_PING_HOST}:{STAY_ALIVE_PING_PORT}")
+    stay_alive_log_message(f"Check interval: {STAY_ALIVE_CHECK_INTERVAL_SECONDS}s")
+    stay_alive_log_message(f"Max reboots per period: {STAY_ALIVE_MAX_REBOOT_ATTEMPTS}")
+    stay_alive_log_message(f"Tracking period: {STAY_ALIVE_TRACKING_PERIOD_SECONDS}s ({STAY_ALIVE_TRACKING_PERIOD_SECONDS/3600:.1f} hours)")
+
+    waiting_for_next_period = False
+
+    while not stay_alive_stop_flag:
+        try:
+            # Check if we're in a waiting period due to max reboots
+            reboot_count = get_reboot_attempts_in_tracking_period()
+
+            if reboot_count >= STAY_ALIVE_MAX_REBOOT_ATTEMPTS:
+                if not waiting_for_next_period:
+                    time_remaining = get_time_until_next_tracking_period()
+                    stay_alive_log_message(
+                        f"Max reboot attempts ({STAY_ALIVE_MAX_REBOOT_ATTEMPTS}) reached. "
+                        f"Waiting {time_remaining/60:.1f} minutes until next attempt window."
+                    )
+                    waiting_for_next_period = True
+
+                # Still check connectivity - we might recover naturally
+                if check_network_connectivity():
+                    stay_alive_log_message("Connection restored during waiting period!")
+                    reset_stay_alive_tracking()
+                    waiting_for_next_period = False
+
+                # Sleep and continue checking
+                for _ in range(STAY_ALIVE_CHECK_INTERVAL_SECONDS):
+                    if stay_alive_stop_flag:
+                        break
+                    time.sleep(1)
+                continue
+
+            waiting_for_next_period = False
+
+            # Check network connectivity
+            if check_network_connectivity():
+                # Connection is good
+                pass
+            else:
+                # Connection lost - attempt recovery
+                stay_alive_log_message("Network connectivity lost!")
+                stay_alive_log_message(f"Reboot attempts in current period: {reboot_count}/{STAY_ALIVE_MAX_REBOOT_ATTEMPTS}")
+
+                # Try reconnection attempts first
+                reconnection_successful = False
+                for attempt in range(STAY_ALIVE_MAX_RECONNECT_ATTEMPTS):
+                    stay_alive_log_message(f"Reconnection attempt {attempt + 1}/{STAY_ALIVE_MAX_RECONNECT_ATTEMPTS}")
+
+                    if attempt_network_reconnection():
+                        reconnection_successful = True
+                        stay_alive_log_message("Network recovered without reboot!")
+                        reset_stay_alive_tracking()
+                        break
+
+                    # Wait before next attempt
+                    stay_alive_log_message(f"Waiting {STAY_ALIVE_RETRY_DELAY_SECONDS}s before next attempt...")
+                    for _ in range(STAY_ALIVE_RETRY_DELAY_SECONDS):
+                        if stay_alive_stop_flag:
+                            break
+                        time.sleep(1)
+
+                    if stay_alive_stop_flag:
+                        break
+
+                # If reconnection failed, consider reboot
+                if not reconnection_successful and not stay_alive_stop_flag:
+                    if reboot_count < STAY_ALIVE_MAX_REBOOT_ATTEMPTS:
+                        stay_alive_log_message(
+                            f"All reconnection attempts failed. Initiating reboot "
+                            f"(attempt {reboot_count + 1}/{STAY_ALIVE_MAX_REBOOT_ATTEMPTS})"
+                        )
+                        perform_system_reboot()
+                        # If we get here, reboot failed
+                        stay_alive_log_message("Reboot command may have failed")
+                    else:
+                        stay_alive_log_message("Max reboot attempts reached, waiting for next period")
+
+            # Wait for next check interval
+            for _ in range(STAY_ALIVE_CHECK_INTERVAL_SECONDS):
+                if stay_alive_stop_flag:
+                    break
+                time.sleep(1)
+
+        except Exception as e:
+            stay_alive_log_message(f"Error in stay-alive monitor: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Wait a bit before continuing
+            time.sleep(10)
+
+    stay_alive_log_message("Stay-alive monitor stopped")
+
+
+def start_stay_alive_monitor():
+    """Start the stay-alive monitor thread"""
+    global stay_alive_thread, stay_alive_stop_flag, stay_alive_enabled
+
+    if stay_alive_thread and stay_alive_thread.is_alive():
+        return False, "Stay-alive monitor already running"
+
+    stay_alive_stop_flag = False
+    stay_alive_enabled = True
+    stay_alive_thread = threading.Thread(target=stay_alive_monitor_loop, daemon=True)
+    stay_alive_thread.start()
+
+    return True, "Stay-alive monitor started"
+
+
+def stop_stay_alive_monitor():
+    """Stop the stay-alive monitor thread"""
+    global stay_alive_stop_flag, stay_alive_thread, stay_alive_enabled
+
+    if not stay_alive_thread or not stay_alive_thread.is_alive():
+        stay_alive_enabled = False
+        return False, "Stay-alive monitor not running"
+
+    stay_alive_stop_flag = True
+    stay_alive_enabled = False
+    stay_alive_log_message("Stopping stay-alive monitor...")
+
+    # Wait for thread to finish (with timeout)
+    stay_alive_thread.join(timeout=5)
+
+    return True, "Stay-alive monitor stopped"
+
+
+def get_stay_alive_status():
+    """Get the current status of the stay-alive system"""
+    reboot_count = get_reboot_attempts_in_tracking_period()
+    time_until_next = get_time_until_next_tracking_period()
+
+    return {
+        "enabled": stay_alive_enabled,
+        "running": stay_alive_thread is not None and stay_alive_thread.is_alive(),
+        "last_successful_ping": stay_alive_last_successful_ping.isoformat() if stay_alive_last_successful_ping else None,
+        "reboot_attempts_in_period": reboot_count,
+        "max_reboot_attempts": STAY_ALIVE_MAX_REBOOT_ATTEMPTS,
+        "tracking_period_seconds": STAY_ALIVE_TRACKING_PERIOD_SECONDS,
+        "time_until_next_period_seconds": time_until_next,
+        "check_interval_seconds": STAY_ALIVE_CHECK_INTERVAL_SECONDS,
+        "ping_host": f"{STAY_ALIVE_PING_HOST}:{STAY_ALIVE_PING_PORT}",
+        "log": stay_alive_log[-20:]  # Last 20 log entries
+    }
 
 
 @app.route('/')
@@ -1110,6 +1463,65 @@ def system_shutdown():
         import traceback
         traceback.print_exc()
         app.logger.error(traceback.format_exc())
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ==================== STAY-ALIVE API ENDPOINTS ====================
+
+@app.route('/api/stay_alive/status')
+def stay_alive_status():
+    """Get the current status of the stay-alive monitor"""
+    try:
+        status = get_stay_alive_status()
+        return jsonify({"status": "success", **status})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/stay_alive/start', methods=['POST'])
+def stay_alive_start():
+    """Start the stay-alive monitor"""
+    try:
+        success, message = start_stay_alive_monitor()
+        return jsonify({"status": "success" if success else "info", "message": message})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/stay_alive/stop', methods=['POST'])
+def stay_alive_stop():
+    """Stop the stay-alive monitor"""
+    try:
+        success, message = stop_stay_alive_monitor()
+        return jsonify({"status": "success" if success else "info", "message": message})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/stay_alive/test_connection')
+def stay_alive_test_connection():
+    """Test the network connectivity check"""
+    try:
+        is_connected = check_network_connectivity()
+        return jsonify({
+            "status": "success",
+            "connected": is_connected,
+            "ping_host": f"{STAY_ALIVE_PING_HOST}:{STAY_ALIVE_PING_PORT}",
+            "last_successful_ping": stay_alive_last_successful_ping.isoformat() if stay_alive_last_successful_ping else None
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/stay_alive/logs')
+def stay_alive_logs():
+    """Get the stay-alive log entries"""
+    try:
+        return jsonify({
+            "status": "success",
+            "logs": stay_alive_log
+        })
+    except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -1983,6 +2395,14 @@ if background_capture_enabled:
     start_background_capture()
 else:
     print("Background capture is disabled")
+
+# Start stay-alive monitor automatically on startup
+if stay_alive_enabled:
+    print("Starting stay-alive network monitor...")
+    start_stay_alive_monitor()
+    print("Stay-alive monitor started")
+else:
+    print("Stay-alive monitor is disabled")
 
 if __name__ == '__main__':
     # This block only runs when executed directly with python3 flask_app.py
