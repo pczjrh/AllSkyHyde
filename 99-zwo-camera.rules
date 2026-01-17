@@ -1,0 +1,19 @@
+# udev rules for ZWO ASI cameras
+# Allows non-root users to access and reset ZWO cameras
+#
+# Installation:
+#   sudo cp 99-zwo-camera.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+#
+# Then unplug and replug the camera, or reboot.
+
+# ZWO ASI cameras - allow all users to access
+SUBSYSTEM=="usb", ATTR{idVendor}=="03c3", MODE="0666", GROUP="plugdev"
+
+# Allow writing to authorized file for USB reset
+SUBSYSTEM=="usb", ATTR{idVendor}=="03c3", RUN+="/bin/chmod 0666 /sys%p/authorized"
+
+# Alternative: Give the plugdev group access to reset
+SUBSYSTEM=="usb", ATTR{idVendor}=="03c3", RUN+="/bin/chgrp plugdev /sys%p/authorized"
+SUBSYSTEM=="usb", ATTR{idVendor}=="03c3", RUN+="/bin/chmod 0664 /sys%p/authorized"

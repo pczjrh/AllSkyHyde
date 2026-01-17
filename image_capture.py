@@ -12,6 +12,9 @@ import os
 import sys
 import json
 import math
+import glob
+import subprocess
+import time
 from datetime import datetime
 from PIL import ImageDraw, ImageFont
 
@@ -34,8 +37,261 @@ DAYTIME_GAIN = 0  # Gain for daytime/civil twilight
 NAUTICAL_GAIN = 50  # Gain for nautical twilight
 NIGHT_GAIN = 100  # Gain for astronomical darkness
 
+# Daytime exposure limit - prevents long exposures during bright conditions
+DAYTIME_MAX_EXPOSURE_MS = 1.0  # Maximum exposure for daytime/civil twilight (1ms)
+
+# Failure handling
+MAX_CONSECUTIVE_FAILURES = 5  # Stop search after this many consecutive capture failures
+USB_RESET_ON_FAILURE = True  # Attempt USB reset when camera fails to respond
+
 # Path to ZWO ASI SDK library
 ASI_LIB_PATH = '/usr/local/lib/libASICamera2.so'
+
+# ZWO camera USB vendor ID
+ZWO_VENDOR_ID = "03c3"  # ZWO USB vendor ID
+
+# Cached sudo password
+_sudo_password = None
+
+
+def load_sudo_password():
+    """Load sudo password from app_config.json if available."""
+    global _sudo_password
+
+    if _sudo_password is not None:
+        return _sudo_password
+
+    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_config.json")
+
+    try:
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            password = config.get('settings', {}).get('sudo_password', '')
+            if password:
+                _sudo_password = password
+                return password
+    except Exception as e:
+        print(f"Could not load sudo password: {e}")
+
+    _sudo_password = ""
+    return ""
+
+
+def run_sudo_command(cmd_args, timeout=30):
+    """
+    Run a command with sudo, using password from config if available.
+    Returns (success, stdout, stderr) tuple.
+    """
+    password = load_sudo_password()
+
+    try:
+        if password:
+            # Use -S flag to read password from stdin
+            full_cmd = ["sudo", "-S"] + cmd_args
+            result = subprocess.run(
+                full_cmd,
+                input=password + "\n",
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+        else:
+            # Try passwordless sudo with -n flag
+            full_cmd = ["sudo", "-n"] + cmd_args
+            result = subprocess.run(
+                full_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+
+        # Filter out password prompts from stderr
+        stderr = result.stderr
+        if stderr:
+            stderr = '\n'.join(
+                line for line in stderr.split('\n')
+                if '[sudo]' not in line and 'password' not in line.lower()
+            )
+
+        return result.returncode == 0, result.stdout, stderr
+
+    except subprocess.TimeoutExpired:
+        return False, "", "Command timed out"
+    except Exception as e:
+        return False, "", str(e)
+
+
+def find_zwo_usb_device():
+    """
+    Find the USB device path for ZWO cameras.
+    Returns the sysfs path to the USB device, or None if not found.
+    """
+    try:
+        # Search for ZWO devices by vendor ID in sysfs
+        usb_devices = glob.glob("/sys/bus/usb/devices/*/idVendor")
+
+        for vendor_file in usb_devices:
+            try:
+                with open(vendor_file, 'r') as f:
+                    vendor_id = f.read().strip()
+
+                if vendor_id == ZWO_VENDOR_ID:
+                    # Found a ZWO device, get the device path
+                    device_path = os.path.dirname(vendor_file)
+
+                    # Read product name for confirmation
+                    product_file = os.path.join(device_path, "product")
+                    product_name = "Unknown"
+                    if os.path.exists(product_file):
+                        with open(product_file, 'r') as f:
+                            product_name = f.read().strip()
+
+                    print(f"Found ZWO device: {product_name} at {device_path}")
+                    return device_path
+
+            except (IOError, OSError):
+                continue
+
+        print("No ZWO USB device found")
+        return None
+
+    except Exception as e:
+        print(f"Error searching for ZWO USB device: {e}")
+        return None
+
+
+def reset_usb_device(device_path):
+    """
+    Reset a USB device by unbinding and rebinding it.
+    Uses sudo password from config if available, otherwise tries passwordless sudo or direct access.
+    Returns True if successful, False otherwise.
+    """
+    if not device_path or not os.path.exists(device_path):
+        print(f"Invalid device path: {device_path}")
+        return False
+
+    device_name = os.path.basename(device_path)
+    password = load_sudo_password()
+    print(f"Attempting to reset USB device: {device_name}")
+    if password:
+        print("  (sudo password available from config)")
+
+    # Method 1: Try using authorized file (may work without sudo if udev rules installed)
+    authorized_file = os.path.join(device_path, "authorized")
+    if os.path.exists(authorized_file):
+        try:
+            print("  Trying authorized file method (direct)...")
+            # Deauthorize (disconnect)
+            with open(authorized_file, 'w') as f:
+                f.write('0')
+            time.sleep(1)
+            # Reauthorize (reconnect)
+            with open(authorized_file, 'w') as f:
+                f.write('1')
+            time.sleep(2)
+            print("  USB device reset via authorized file (direct)")
+            return True
+        except PermissionError:
+            print("  Direct access denied, trying with sudo...")
+            # Try with sudo
+            success, _, stderr = run_sudo_command(
+                ["sh", "-c", f"echo 0 > {authorized_file} && sleep 1 && echo 1 > {authorized_file}"],
+                timeout=10
+            )
+            if success:
+                print("  USB device reset via authorized file (sudo)")
+                time.sleep(2)
+                return True
+            else:
+                print(f"  Authorized file with sudo failed: {stderr}")
+        except Exception as e:
+            print(f"  Authorized file method failed: {e}")
+
+    # Method 2: Try using usbreset command if available
+    try:
+        # Find the /dev/bus/usb path
+        busnum_file = os.path.join(device_path, "busnum")
+        devnum_file = os.path.join(device_path, "devnum")
+
+        if os.path.exists(busnum_file) and os.path.exists(devnum_file):
+            with open(busnum_file, 'r') as f:
+                busnum = int(f.read().strip())
+            with open(devnum_file, 'r') as f:
+                devnum = int(f.read().strip())
+
+            usb_dev_path = f"/dev/bus/usb/{busnum:03d}/{devnum:03d}"
+
+            if os.path.exists(usb_dev_path):
+                print(f"  Trying usbreset on {usb_dev_path}...")
+                success, _, stderr = run_sudo_command(["usbreset", usb_dev_path], timeout=10)
+                if success:
+                    print("  USB device reset via usbreset")
+                    time.sleep(2)
+                    return True
+                else:
+                    print(f"  usbreset failed: {stderr}")
+    except FileNotFoundError:
+        print("  usbreset command not found")
+    except Exception as e:
+        print(f"  usbreset method failed: {e}")
+
+    # Method 3: Try unbind/bind through driver
+    try:
+        print("  Trying driver unbind/bind method...")
+        driver_link = os.path.join(device_path, "driver")
+        if os.path.islink(driver_link):
+            driver_path = os.path.realpath(driver_link)
+            unbind_path = os.path.join(driver_path, "unbind")
+            bind_path = os.path.join(driver_path, "bind")
+
+            if os.path.exists(unbind_path) and os.path.exists(bind_path):
+                # Unbind
+                success1, _, stderr1 = run_sudo_command(
+                    ["sh", "-c", f"echo '{device_name}' > {unbind_path}"],
+                    timeout=5
+                )
+                time.sleep(1)
+                # Bind
+                success2, _, stderr2 = run_sudo_command(
+                    ["sh", "-c", f"echo '{device_name}' > {bind_path}"],
+                    timeout=5
+                )
+                if success1 and success2:
+                    print("  USB device reset via driver unbind/bind")
+                    time.sleep(2)
+                    return True
+                else:
+                    print(f"  Driver unbind/bind failed: {stderr1} {stderr2}")
+    except Exception as e:
+        print(f"  Driver unbind/bind method failed: {e}")
+
+    print("  All USB reset methods failed")
+    return False
+
+
+def reset_zwo_camera():
+    """
+    Find and reset the ZWO camera USB device.
+    Returns True if reset was successful, False otherwise.
+    """
+    print("\n" + "="*60)
+    print("ATTEMPTING USB CAMERA RESET")
+    print("="*60)
+
+    device_path = find_zwo_usb_device()
+    if device_path:
+        success = reset_usb_device(device_path)
+        if success:
+            print("Camera USB reset successful - waiting for device to reinitialize...")
+            time.sleep(3)  # Give the camera time to reinitialize
+            return True
+        else:
+            print("Camera USB reset failed")
+            return False
+    else:
+        print("Could not find ZWO camera to reset")
+        return False
 
 
 def load_exposure_config():
@@ -200,7 +456,7 @@ def initialize_camera():
     image_type = asi.ASI_IMG_RAW8
     dtype = np.uint8
     
-    target_adu = TARGET_ADU #full_well / 4.0
+    target_adu = TARGET_ADU if TARGET_ADU is not None else full_well / 4.0
     print(f"Image mode: 8-bit (RAW8)")
     print(f"Full-well capacity: {full_well} ADU")
     print(f"Target brightness: {target_adu:.1f} ADU (25% of full-well)")
@@ -331,19 +587,32 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
     - Tests initial exposure steps to find bounds (too dark / too bright)
     - Refines search between bounds using smaller steps
     - Stops searching when image is too bright (no need to test longer exposures)
+    - Limits exposure to 1ms during daytime to prevent excessive search times
+    - Stops after consecutive capture failures to detect camera issues early
     - Logs all attempts and failures for debugging
     """
+    # Determine solar period first for exposure limit calculation
+    solar_period = get_solar_period()
+    is_daytime = solar_period in ['daytime', 'civil_twilight']
+
+    # Apply daytime exposure limit
+    effective_max_exposure = DAYTIME_MAX_EXPOSURE_MS if is_daytime else MAX_EXPOSURE_MS
+
     print("\n" + "="*60, flush=True)
     print("FINDING OPTIMAL EXPOSURE TIME (ADAPTIVE GAIN SEARCH)", flush=True)
     print("="*60, flush=True)
     print(f"Min exposure: {MIN_EXPOSURE_MS} ms", flush=True)
-    print(f"Max exposure: {MAX_EXPOSURE_MS} ms", flush=True)
+    print(f"Max exposure: {effective_max_exposure} ms" + (" (daytime limit)" if is_daytime else ""), flush=True)
     print(f"Target brightness: {target_adu:.1f} ADU", flush=True)
     print(f"Test region size: {TEST_REGION_SIZE}x{TEST_REGION_SIZE} pixels", flush=True)
+    print(f"Solar period: {solar_period}" + (" - limiting exposure to 1ms" if is_daytime else ""), flush=True)
 
     # Determine initial gain based on solar period
     initial_gain = get_initial_gain()
     current_gain = initial_gain
+
+    # Track consecutive failures to detect camera issues
+    consecutive_failures = 0
 
     tolerance = 0.15  # Accept images within 15% of target
     best_exposure = None
@@ -355,8 +624,9 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
     successful_captures = []  # Track all successes
 
     # Helper function to test an exposure with current gain
+    # Returns (mean_adu, should_abort) tuple - should_abort is True if we hit max consecutive failures
     def test_exposure(exposure_time_ms, gain):
-        nonlocal best_exposure, best_gain, best_mean_adu, best_ratio_diff
+        nonlocal best_exposure, best_gain, best_mean_adu, best_ratio_diff, consecutive_failures
 
         print(f"\nTesting exposure: {exposure_time_ms:.3f} ms @ gain {gain}", flush=True)
 
@@ -371,7 +641,12 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
                 'error': error_msg,
                 'type': 'configuration_error'
             })
-            return None
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                print(f"\n✗ ✗ ✗ CAMERA ERROR: {consecutive_failures} consecutive failures detected ✗ ✗ ✗", flush=True)
+                print("  Camera may be disconnected or not responding.", flush=True)
+                return None, True  # Signal abort
+            return None, False
 
         # Capture test image with retries
         img_array = capture_test_image(camera, camera_info, exposure_time_ms, dtype, retries=3)
@@ -384,7 +659,16 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
                 'error': error_msg,
                 'type': 'capture_failed'
             })
-            return None
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                print(f"\n✗ ✗ ✗ CAMERA ERROR: {consecutive_failures} consecutive failures detected ✗ ✗ ✗", flush=True)
+                print("  Camera may be disconnected or not responding.", flush=True)
+                print("  Please check camera connection and USB cables.", flush=True)
+                return None, True  # Signal abort
+            return None, False
+
+        # Reset consecutive failures on successful capture
+        consecutive_failures = 0
 
         # Calculate mean of central region
         try:
@@ -397,7 +681,7 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
                 'error': error_msg,
                 'type': 'calculation_error'
             })
-            return None
+            return None, False
 
         ratio = mean_adu / target_adu
         ratio_diff = abs(ratio - 1.0)
@@ -421,24 +705,37 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
             best_mean_adu = mean_adu
             print(f"  → New best: {best_exposure:.3f} ms @ gain {best_gain} (ratio diff: {best_ratio_diff:.3f})", flush=True)
 
-        return mean_adu
+        return mean_adu, False  # Success, don't abort
 
     # PHASE 1: Find bounds using coarse steps with adaptive gain
     print("\n--- PHASE 1: Finding bounds with adaptive gain ---", flush=True)
     coarse_steps = [0.034, 0.05, 0.1, 0.2, 0.5, 1, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000]
-    coarse_steps = [e for e in coarse_steps if MIN_EXPOSURE_MS <= e <= MAX_EXPOSURE_MS]
+    # Filter steps based on effective max exposure (respects daytime limit)
+    coarse_steps = [e for e in coarse_steps if MIN_EXPOSURE_MS <= e <= effective_max_exposure]
+
+    if not coarse_steps:
+        print(f"  Warning: No valid exposure steps in range {MIN_EXPOSURE_MS}-{effective_max_exposure} ms", flush=True)
+        coarse_steps = [MIN_EXPOSURE_MS]
 
     lower_bound = None  # Exposure that's too dark
     upper_bound = None  # Exposure that's too bright
     found_optimal = False
+    abort_search = False  # Flag to signal camera failure
 
     # For each exposure time, try increasing gain levels before moving to next exposure
     for exposure_ms in coarse_steps:
+        if abort_search:
+            break
+
         print(f"\n--- Testing exposure: {exposure_ms:.3f} ms ---", flush=True)
 
         # Try different gain levels at this exposure time
         for current_gain in range(initial_gain, MAX_GAIN + 1, GAIN_INCREMENT):
-            mean_adu = test_exposure(exposure_ms, current_gain)
+            mean_adu, should_abort = test_exposure(exposure_ms, current_gain)
+
+            if should_abort:
+                abort_search = True
+                break
 
             if mean_adu is None:
                 continue
@@ -483,8 +780,24 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
         if found_optimal or (lower_bound is not None and upper_bound is not None):
             break
 
-    # PHASE 2: Refine search between bounds
-    if lower_bound is not None and upper_bound is not None:
+    # Check if we aborted due to camera failure
+    if abort_search:
+        print("\n" + "="*60, flush=True)
+        print("EXPOSURE SEARCH ABORTED - CAMERA FAILURE", flush=True)
+        print("="*60, flush=True)
+        print_capture_summary(successful_captures, failed_captures)
+        print(f"\n✗ ✗ ✗ CAMERA NOT RESPONDING ✗ ✗ ✗", flush=True)
+        print("  The camera failed to capture images after multiple attempts.", flush=True)
+        print("  Please check:", flush=True)
+        print("    - Camera USB connection", flush=True)
+        print("    - Camera power supply", flush=True)
+        print("    - USB bandwidth (try a different port)", flush=True)
+        print("    - Camera driver/SDK installation", flush=True)
+        sys.stdout.flush()
+        return None, None  # Signal failure to caller
+
+    # PHASE 2: Refine search between bounds (skip if daytime limit reached without finding bounds)
+    if lower_bound is not None and upper_bound is not None and not abort_search:
         print(f"\n--- PHASE 2: Refining search between {lower_bound} and {upper_bound} ms ---", flush=True)
 
         # Generate refinement steps between bounds
@@ -500,12 +813,19 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
 
         # Test refinement steps with adaptive gain
         for exposure_ms in refine_steps:
+            if abort_search:
+                break
+
             if exposure_ms <= lower_bound or exposure_ms >= upper_bound:
                 continue
 
             # Try increasing gain at each refinement exposure
             for current_gain in range(initial_gain, MAX_GAIN + 1, GAIN_INCREMENT):
-                mean_adu = test_exposure(exposure_ms, current_gain)
+                mean_adu, should_abort = test_exposure(exposure_ms, current_gain)
+
+                if should_abort:
+                    abort_search = True
+                    break
 
                 if mean_adu is None:
                     continue
@@ -530,6 +850,16 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
                 else:
                     break  # Max gain reached, move to next exposure
 
+        # Check again if Phase 2 caused an abort
+        if abort_search:
+            print("\n" + "="*60, flush=True)
+            print("EXPOSURE SEARCH ABORTED - CAMERA FAILURE", flush=True)
+            print("="*60, flush=True)
+            print_capture_summary(successful_captures, failed_captures)
+            print(f"\n✗ ✗ ✗ CAMERA NOT RESPONDING ✗ ✗ ✗", flush=True)
+            sys.stdout.flush()
+            return None, None
+
     # Use the best result we found
     print("\n" + "="*60, flush=True)
     print("EXPOSURE SEARCH COMPLETE", flush=True)
@@ -542,7 +872,14 @@ def find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype):
         print(f"  Ratio difference: {best_ratio_diff:.3f}", flush=True)
         return best_exposure, best_gain
 
-    # If everything failed, use fallback
+    # If everything failed and we're in daytime, provide specific guidance
+    if is_daytime:
+        print(f"\n⚠ ⚠ ⚠ NO VALID EXPOSURE FOUND IN DAYTIME RANGE (max {DAYTIME_MAX_EXPOSURE_MS}ms) ⚠ ⚠ ⚠", flush=True)
+        print("  This may indicate the scene is too dark for daytime settings.", flush=True)
+        print("  Using minimum exposure as fallback.", flush=True)
+        return MIN_EXPOSURE_MS, DAYTIME_GAIN
+
+    # If everything failed at night, use fallback
     print(f"\n⚠ ⚠ ⚠ ALL EXPOSURES FAILED - USING FALLBACK: {FALLBACK_EXPOSURE_MS} ms @ gain {initial_gain} ⚠ ⚠ ⚠", flush=True)
     return FALLBACK_EXPOSURE_MS, initial_gain
 
@@ -643,6 +980,57 @@ def main():
         # Find optimal exposure time and gain
         optimal_exposure, optimal_gain = find_optimal_exposure(camera, camera_info, target_adu, image_type, dtype)
 
+        # Check for camera failure (both None indicates persistent capture failures)
+        if optimal_exposure is None and optimal_gain is None:
+            print("\n" + "="*60)
+            print("CAPTURE ABORTED - CAMERA FAILURE")
+            print("="*60)
+            print("The camera is not responding to capture commands.")
+
+            # Attempt USB reset if enabled
+            if USB_RESET_ON_FAILURE:
+                print("\nAttempting to recover camera via USB reset...")
+                close_camera_safely(camera)
+                camera = None
+
+                if reset_zwo_camera():
+                    print("\nUSB reset successful, reinitializing camera...")
+                    try:
+                        # Reinitialize the ASI library and camera
+                        asi.init(ASI_LIB_PATH)
+                        camera, camera_info, target_adu, image_type, dtype = initialize_camera()
+
+                        # Try to find optimal exposure again
+                        print("\nRetrying exposure search after USB reset...")
+                        optimal_exposure, optimal_gain = find_optimal_exposure(
+                            camera, camera_info, target_adu, image_type, dtype
+                        )
+
+                        if optimal_exposure is not None:
+                            print("\nCamera recovered after USB reset!")
+                            # Continue with capture (don't exit)
+                        else:
+                            print("\nCamera still not responding after USB reset.")
+                            print("Please check hardware connection.")
+                            close_camera_safely(camera)
+                            sys.exit(1)
+
+                    except Exception as e:
+                        print(f"\nFailed to reinitialize camera after USB reset: {e}")
+                        close_camera_safely(camera)
+                        sys.exit(1)
+                else:
+                    print("\nUSB reset failed. Please check camera connection manually.")
+                    print("This capture cycle has been stopped.")
+                    sys.exit(1)
+            else:
+                print("\nUSB reset is disabled. Enable USB_RESET_ON_FAILURE to try automatic recovery.")
+                print("This capture cycle has been stopped to prevent endless retries.")
+                print("\nPlease investigate the camera connection before the next capture cycle.")
+                close_camera_safely(camera)
+                sys.exit(1)
+
+        # If only exposure is None (shouldn't happen with current logic, but handle it)
         if optimal_exposure is None:
             print("\n⚠ Failed to find optimal exposure! Using default 1000ms @ gain 50.")
             optimal_exposure = 1000  # Use 1 second as fallback

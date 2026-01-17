@@ -56,6 +56,9 @@ stay_alive_log = []
 stay_alive_reboot_attempts = []  # List of timestamps of reboot attempts
 stay_alive_last_successful_ping = None
 stay_alive_enabled = True  # Enable stay-alive by default
+stay_alive_sudo_available = None  # None = not checked, True/False = cached result
+stay_alive_sudo_password = None  # Cached sudo password from config
+stay_alive_sudo_warning_logged = False  # Only log sudo warning once
 
 # Global settings storage
 app_settings = {
@@ -108,10 +111,10 @@ def load_config():
                 if 'max_exposure_ms' in config:
                     app_settings['max_exposure_ms'] = config['max_exposure_ms']
 
-                # Load paths (optional, can be overridden)
-                if 'image_dir' in config:
+                # Load paths (optional, can be overridden) - only if non-empty
+                if config.get('image_dir'):
                     IMAGE_DIR = config['image_dir']
-                if 'script_path' in config:
+                if config.get('script_path'):
                     SCRIPT_PATH = config['script_path']
 
                 print(f"Configuration loaded from {CONFIG_FILE}")
@@ -510,6 +513,149 @@ def stay_alive_log_message(message):
     print(f"STAY-ALIVE: {message}")
 
 
+def load_sudo_password():
+    """Load sudo password from config file if available."""
+    global stay_alive_sudo_password
+
+    if stay_alive_sudo_password is not None:
+        return stay_alive_sudo_password
+
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_config.json")
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            password = config.get('settings', {}).get('sudo_password', '')
+            if password:
+                stay_alive_sudo_password = password
+                return password
+    except Exception as e:
+        stay_alive_log_message(f"Could not load sudo password from config: {e}")
+
+    stay_alive_sudo_password = ""  # Empty string means no password configured
+    return ""
+
+
+def check_sudo_available():
+    """
+    Check if sudo commands can be run (either passwordless or with configured password).
+    Caches the result to avoid repeated checks and log spam.
+    Returns True if sudo is available, False otherwise.
+    """
+    global stay_alive_sudo_available, stay_alive_sudo_warning_logged
+
+    # Return cached result if already checked
+    if stay_alive_sudo_available is not None:
+        return stay_alive_sudo_available
+
+    # Only check on Linux
+    if platform.system() != "Linux":
+        stay_alive_sudo_available = False
+        return False
+
+    # First, check if passwordless sudo works
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "true"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            stay_alive_sudo_available = True
+            stay_alive_log_message("Passwordless sudo available for network commands")
+            return True
+    except (subprocess.TimeoutExpired, Exception):
+        pass
+
+    # Passwordless didn't work, check if we have a configured password
+    password = load_sudo_password()
+    if password:
+        try:
+            # Test sudo with password using -S flag (read from stdin)
+            result = subprocess.run(
+                ["sudo", "-S", "true"],
+                input=password + "\n",
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                stay_alive_sudo_available = True
+                stay_alive_log_message("Sudo available with configured password")
+                return True
+            else:
+                stay_alive_log_message("WARNING: Configured sudo password is incorrect")
+                stay_alive_sudo_warning_logged = True
+        except subprocess.TimeoutExpired:
+            stay_alive_log_message("WARNING: Sudo password test timed out")
+        except Exception as e:
+            stay_alive_log_message(f"WARNING: Sudo password test failed: {e}")
+
+    # Neither method worked
+    if not stay_alive_sudo_warning_logged:
+        stay_alive_log_message("WARNING: Sudo not available")
+        stay_alive_log_message("Network commands will be skipped")
+        stay_alive_log_message("To enable, either:")
+        stay_alive_log_message("  1. Set sudo_password in settings, OR")
+        stay_alive_log_message("  2. Configure passwordless sudo in /etc/sudoers.d/allsky")
+        stay_alive_sudo_warning_logged = True
+
+    stay_alive_sudo_available = False
+    return False
+
+
+def run_sudo_command(cmd_args, description="", timeout=30):
+    """
+    Run a command with sudo, using password from config if needed.
+    Returns (success, stdout, stderr) tuple.
+    """
+    if platform.system() != "Linux":
+        return False, "", "Not Linux"
+
+    if not check_sudo_available():
+        return False, "", "Sudo not available"
+
+    password = load_sudo_password()
+
+    try:
+        if password:
+            # Use -S flag to read password from stdin
+            full_cmd = ["sudo", "-S"] + cmd_args
+            result = subprocess.run(
+                full_cmd,
+                input=password + "\n",
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+        else:
+            # Use -n flag for passwordless sudo
+            full_cmd = ["sudo", "-n"] + cmd_args
+            result = subprocess.run(
+                full_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+
+        success = result.returncode == 0
+        # Filter out password prompt from stderr if present
+        stderr = result.stderr
+        if stderr:
+            stderr = '\n'.join(
+                line for line in stderr.split('\n')
+                if '[sudo]' not in line and 'password' not in line.lower()
+            )
+
+        return success, result.stdout, stderr
+
+    except subprocess.TimeoutExpired:
+        return False, "", "Command timed out"
+    except Exception as e:
+        return False, "", str(e)
+
+
 def check_network_connectivity():
     """
     Check if network connectivity is available by attempting to connect to a known host.
@@ -580,62 +726,102 @@ def attempt_network_reconnection():
     """
     Attempt to reconnect to the network using various methods.
     Returns True if reconnection succeeded, False otherwise.
+
+    Strategy:
+    1. First, wait briefly and check if network recovers on its own
+    2. If sudo is available (passwordless or with configured password), try network restart commands
+    3. Wait for network to stabilize and check again
     """
     stay_alive_log_message("Attempting network reconnection...")
 
-    # Try different reconnection methods based on the platform
-    reconnection_commands = []
-
-    if platform.system() == "Linux":
-        # Linux-specific network restart commands
-        reconnection_commands = [
-            # Try systemd network restart
-            ["sudo", "systemctl", "restart", "NetworkManager"],
-            # Alternative: restart networking service
-            ["sudo", "systemctl", "restart", "networking"],
-            # Try bringing interface down and up (common on embedded systems)
-            ["sudo", "ip", "link", "set", "eth0", "down"],
-            ["sudo", "ip", "link", "set", "eth0", "up"],
-            # Also try wlan0 for WiFi
-            ["sudo", "ip", "link", "set", "wlan0", "down"],
-            ["sudo", "ip", "link", "set", "wlan0", "up"],
-            # Try dhclient to renew IP
-            ["sudo", "dhclient", "-r"],
-            ["sudo", "dhclient"],
-        ]
-    elif platform.system() == "Windows":
-        reconnection_commands = [
-            ["netsh", "interface", "set", "interface", "Ethernet", "disable"],
-            ["netsh", "interface", "set", "interface", "Ethernet", "enable"],
-            ["ipconfig", "/release"],
-            ["ipconfig", "/renew"],
-        ]
-
-    for cmd in reconnection_commands:
-        try:
-            stay_alive_log_message(f"Running: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if result.returncode == 0:
-                stay_alive_log_message(f"Command succeeded: {' '.join(cmd)}")
-            else:
-                stay_alive_log_message(f"Command failed (code {result.returncode}): {result.stderr}")
-        except subprocess.TimeoutExpired:
-            stay_alive_log_message(f"Command timed out: {' '.join(cmd)}")
-        except Exception as e:
-            stay_alive_log_message(f"Error running command: {str(e)}")
-
-        # Wait briefly between commands
-        time.sleep(2)
-
-    # Wait a bit for network to stabilize
+    # First, wait a moment and check if the network recovers naturally
+    # (This often works for brief connectivity blips)
+    stay_alive_log_message("Waiting 5s for natural network recovery...")
     time.sleep(5)
 
-    # Check if reconnection was successful
+    if check_network_connectivity():
+        stay_alive_log_message("Network recovered naturally!")
+        return True
+
+    # Check if we can run sudo commands (passwordless or with password)
+    sudo_available = check_sudo_available()
+
+    if platform.system() == "Linux":
+        if sudo_available:
+            # Linux-specific network restart commands
+            # Commands are specified without sudo prefix - run_sudo_command adds it
+            reconnection_commands = [
+                # Try dhclient first as it's less disruptive
+                (["dhclient", "-r"], "Release DHCP lease"),
+                (["dhclient"], "Renew DHCP lease"),
+                # Try bringing WiFi interface down and up
+                (["ip", "link", "set", "wlan0", "down"], "Disable WiFi"),
+                (["ip", "link", "set", "wlan0", "up"], "Enable WiFi"),
+                # Try ethernet as well
+                (["ip", "link", "set", "eth0", "down"], "Disable Ethernet"),
+                (["ip", "link", "set", "eth0", "up"], "Enable Ethernet"),
+                # Last resort: restart NetworkManager
+                (["systemctl", "restart", "NetworkManager"], "Restart NetworkManager"),
+            ]
+
+            for cmd_args, description in reconnection_commands:
+                stay_alive_log_message(f"{description}...")
+                success, stdout, stderr = run_sudo_command(cmd_args, description, timeout=30)
+
+                if success:
+                    stay_alive_log_message(f"  Success")
+                else:
+                    # Don't log full error for non-existent interfaces (common)
+                    if "Cannot find device" in stderr or "does not exist" in stderr:
+                        stay_alive_log_message(f"  Skipped (interface not found)")
+                    elif stderr:
+                        stay_alive_log_message(f"  Failed: {stderr.strip()[:100]}")
+                    else:
+                        stay_alive_log_message(f"  Failed")
+
+                # Brief pause between commands
+                time.sleep(1)
+
+                # Check if network came back after each command
+                if check_network_connectivity():
+                    stay_alive_log_message("Network reconnection successful!")
+                    return True
+        else:
+            stay_alive_log_message("Sudo not available - skipping network commands")
+            stay_alive_log_message("Set sudo_password in settings or configure passwordless sudo")
+
+    elif platform.system() == "Windows":
+        # Windows commands don't need sudo
+        reconnection_commands = [
+            (["ipconfig", "/release"], "Release IP"),
+            (["ipconfig", "/renew"], "Renew IP"),
+        ]
+
+        for cmd, description in reconnection_commands:
+            try:
+                stay_alive_log_message(f"{description}...")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    stay_alive_log_message(f"  Success")
+                else:
+                    stay_alive_log_message(f"  Failed: {result.stderr.strip()[:100]}")
+            except subprocess.TimeoutExpired:
+                stay_alive_log_message(f"  Timeout")
+            except Exception as e:
+                stay_alive_log_message(f"  Error: {str(e)[:50]}")
+
+            time.sleep(1)
+
+    # Final wait for network to stabilize
+    stay_alive_log_message("Waiting 10s for network to stabilize...")
+    time.sleep(10)
+
+    # Final connectivity check
     if check_network_connectivity():
         stay_alive_log_message("Network reconnection successful!")
         return True
 
-    stay_alive_log_message("Network reconnection failed")
+    stay_alive_log_message("Network reconnection failed - may need system reboot")
     return False
 
 
@@ -643,6 +829,7 @@ def perform_system_reboot():
     """
     Perform a system reboot to attempt to restore network connectivity.
     Records the reboot attempt before initiating.
+    Returns True if reboot was initiated, False if it couldn't be performed.
     """
     record_reboot_attempt()
     stay_alive_log_message("INITIATING SYSTEM REBOOT...")
@@ -658,15 +845,29 @@ def perform_system_reboot():
 
     try:
         if platform.system() == "Linux":
-            # Use sudo reboot on Linux
-            subprocess.run(["sudo", "reboot"], check=True)
+            # Check if we can use sudo (passwordless or with password)
+            if not check_sudo_available():
+                stay_alive_log_message("ERROR: Cannot reboot - sudo not available")
+                stay_alive_log_message("Set sudo_password in settings or configure passwordless sudo")
+                return False
+
+            # Use the run_sudo_command helper which handles password if needed
+            success, stdout, stderr = run_sudo_command(["reboot"], "System reboot", timeout=10)
+            if not success:
+                stay_alive_log_message(f"Reboot command failed: {stderr.strip()}")
+                return False
+            return True
+
         elif platform.system() == "Windows":
-            # Use shutdown command on Windows
+            # Use shutdown command on Windows (doesn't need sudo)
             subprocess.run(["shutdown", "/r", "/t", "5", "/c", "AllSky stay-alive reboot"], check=True)
+            return True
         else:
             stay_alive_log_message(f"Unsupported platform for reboot: {platform.system()}")
+            return False
     except Exception as e:
         stay_alive_log_message(f"Failed to initiate reboot: {str(e)}")
+        return False
 
 
 def reset_stay_alive_tracking():
