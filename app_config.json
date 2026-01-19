@@ -22,7 +22,9 @@
         "sftp_username": "",
         "sftp_password": "",
         "sftp_remote_path": "",
-        "sudo_password": ""
+        "sudo_password": "",
+        "compass_rotation": 0,
+        "compass_enabled": true
     },
     "capture_interval": 300,
     "background_capture_enabled": true,

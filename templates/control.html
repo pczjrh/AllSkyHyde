@@ -401,6 +401,42 @@
                             </div>
                         </div>
 
+                        <!-- Compass Settings -->
+                        <div class="settings-group">
+                            <h3>Compass Overlay</h3>
+                            <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
+                                Configure the compass overlay shown on the latest image.
+                            </p>
+
+                            <div class="toggle-container">
+                                <span class="toggle-text">Show Compass</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="compassEnabled" class="toggle-checkbox">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="setting-item" style="margin-top: 15px;">
+                                <label for="compassRotation">Rotation (degrees):</label>
+                                <input type="number" id="compassRotation" min="0" max="359" step="1"
+                                       placeholder="0" value="0">
+                                <span class="setting-hint">0-359 (0 = N at bottom-left)</span>
+                            </div>
+
+                            <div class="compass-preview" style="margin-top: 15px; text-align: center;">
+                                <div id="compassPreview" style="display: inline-block; width: 80px; height: 80px; position: relative;">
+                                    <div style="width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); border: 2px solid rgba(255, 255, 255, 0.7); border-radius: 50%; position: relative;">
+                                        <span style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); color: #ff6b6b; font-weight: bold; font-size: 14px;">N</span>
+                                        <span style="position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); color: white; font-weight: bold; font-size: 14px;">S</span>
+                                        <span style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: white; font-weight: bold; font-size: 14px;">E</span>
+                                        <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: white; font-weight: bold; font-size: 14px;">W</span>
+                                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background: rgba(255, 255, 255, 0.8); border-radius: 50%;"></div>
+                                    </div>
+                                </div>
+                                <div style="font-size: 0.8em; color: #999; margin-top: 5px;">Preview</div>
+                            </div>
+                        </div>
+
                         <!-- Save Button -->
                         <div class="settings-actions">
                             <button id="saveSettingsButton" class="primary-button">Save Settings</button>
@@ -648,6 +684,12 @@
                         document.getElementById('ftpRemotePath').value = data.ftp_remote_path;
                     }
 
+                    // Load compass settings
+                    console.log('Loading compass settings:', data.compass_enabled, data.compass_rotation);
+                    document.getElementById('compassEnabled').checked = data.compass_enabled !== undefined ? data.compass_enabled : true;
+                    document.getElementById('compassRotation').value = data.compass_rotation !== undefined ? data.compass_rotation : 0;
+                    updateCompassPreview(data.compass_rotation || 0);
+
                     settingsLoaded = true;
 
                     // Update solar info if location is set
@@ -678,6 +720,8 @@
             const ftpUsername = document.getElementById('ftpUsername').value;
             const ftpPassword = document.getElementById('ftpPassword').value;
             const ftpRemotePath = document.getElementById('ftpRemotePath').value;
+            const compassEnabled = document.getElementById('compassEnabled').checked;
+            const compassRotation = document.getElementById('compassRotation').value;
 
             const settings = {
                 latitude: latitude ? parseFloat(latitude) : null,
@@ -696,8 +740,12 @@
                 ftp_port: ftpPort ? parseInt(ftpPort) : 21,
                 ftp_username: ftpUsername || null,
                 ftp_password: ftpPassword || null,
-                ftp_remote_path: ftpRemotePath || null
+                ftp_remote_path: ftpRemotePath || null,
+                compass_enabled: compassEnabled,
+                compass_rotation: compassRotation ? parseInt(compassRotation) : 0
             };
+
+            console.log('Saving compass settings:', settings.compass_enabled, settings.compass_rotation);
 
             fetch('/api/settings', {
                 method: 'POST',
@@ -751,6 +799,19 @@
                     console.error('Error loading solar info:', error);
                 });
         }
+
+        // Compass preview update function
+        function updateCompassPreview(rotation) {
+            const preview = document.getElementById('compassPreview');
+            if (preview) {
+                preview.style.transform = `rotate(${rotation}deg)`;
+            }
+        }
+
+        // Event listener for compass rotation input
+        document.getElementById('compassRotation').addEventListener('input', function() {
+            updateCompassPreview(this.value);
+        });
 
         // Event listeners for settings
         document.getElementById('saveSettingsButton').addEventListener('click', saveSettings);

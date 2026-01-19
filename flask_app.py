@@ -78,7 +78,9 @@ app_settings = {
     "ftp_port": 21,
     "ftp_username": None,
     "ftp_password": None,
-    "ftp_remote_path": None
+    "ftp_remote_path": None,
+    "compass_rotation": 0,
+    "compass_enabled": True
 }
 
 # NOTE: Configuration loading moved to after function definitions to avoid import errors
@@ -148,12 +150,17 @@ def save_config():
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
+        print(f"Attempting to save config to: {CONFIG_FILE}")
+        print(f"File exists before save: {os.path.exists(CONFIG_FILE)}")
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=4)
-
+            f.flush()
+            os.fsync(f.fileno())
         print(f"Configuration saved to {CONFIG_FILE}")
+        print(f"File exists after save: {os.path.exists(CONFIG_FILE)}")
         print(f"Settings: lat={app_settings.get('latitude')}, lon={app_settings.get('longitude')}, api_key={'set' if app_settings.get('openweather_api_key') else 'not set'}")
         print(f"Exposure limits: min={app_settings.get('min_exposure_ms')}ms, max={app_settings.get('max_exposure_ms')}ms")
+        print(f"Compass: enabled={app_settings.get('compass_enabled')}, rotation={app_settings.get('compass_rotation')}")
         return True
     except Exception as e:
         print(f"Error saving configuration to {CONFIG_FILE}: {str(e)}")
@@ -1049,11 +1056,26 @@ def index():
 
     # NOTE: Removed run_capture_script() call from here!
 
+    # Get compass settings - read fresh from config file to handle multi-worker scenarios
+    compass_rotation = 0
+    compass_enabled = True
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                compass_rotation = config.get('settings', {}).get('compass_rotation', 0)
+                compass_enabled = config.get('settings', {}).get('compass_enabled', True)
+    except Exception as e:
+        print(f"Error reading compass settings: {e}")
+    print(f"Index page - Compass: enabled={compass_enabled}, rotation={compass_rotation}")
+
     response = app.make_response(render_template('index.html',
                            latest_image=latest_image,
                            capture_interval=capture_interval,
                            last_capture_timestamp=last_capture_timestamp,
-                           background_running=background_capture_enabled))
+                           background_running=background_capture_enabled,
+                           compass_rotation=compass_rotation,
+                           compass_enabled=compass_enabled))
 
     # Add cache control headers to prevent browser caching
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -2147,6 +2169,12 @@ def api_settings():
                 app_settings['ftp_password'] = data['ftp_password']
             if 'ftp_remote_path' in data:
                 app_settings['ftp_remote_path'] = data['ftp_remote_path']
+            if 'compass_rotation' in data:
+                app_settings['compass_rotation'] = int(data['compass_rotation']) % 360
+                print(f"Compass rotation set to: {app_settings['compass_rotation']}")
+            if 'compass_enabled' in data:
+                app_settings['compass_enabled'] = bool(data['compass_enabled'])
+                print(f"Compass enabled set to: {app_settings['compass_enabled']}")
 
             # Save configuration to file
             save_config()
