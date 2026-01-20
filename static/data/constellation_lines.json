@@ -1,0 +1,619 @@
+{
+  "description": "Constellation line patterns connecting bright stars",
+  "constellations": [
+    {
+      "name": "Ursa Major",
+      "abbr": "UMa",
+      "lines": [
+        ["Dubhe", "Merak"],
+        ["Merak", "Phecda"],
+        ["Phecda", "Megrez"],
+        ["Megrez", "Alioth"],
+        ["Alioth", "Mizar"],
+        ["Mizar", "Alkaid"],
+        ["Megrez", "Dubhe"]
+      ]
+    },
+    {
+      "name": "Ursa Minor",
+      "abbr": "UMi",
+      "lines": [
+        ["Polaris", "Delta UMi"],
+        ["Delta UMi", "Epsilon UMi"],
+        ["Epsilon UMi", "Zeta UMi"],
+        ["Zeta UMi", "Eta UMi"],
+        ["Eta UMi", "Gamma UMi"],
+        ["Gamma UMi", "Kochab"],
+        ["Kochab", "Zeta UMi"]
+      ]
+    },
+    {
+      "name": "Orion",
+      "abbr": "Ori",
+      "lines": [
+        ["Betelgeuse", "Bellatrix"],
+        ["Bellatrix", "Mintaka"],
+        ["Mintaka", "Alnilam"],
+        ["Alnilam", "Alnitak"],
+        ["Alnitak", "Saiph"],
+        ["Saiph", "Rigel"],
+        ["Rigel", "Mintaka"],
+        ["Betelgeuse", "Alnitak"]
+      ]
+    },
+    {
+      "name": "Cassiopeia",
+      "abbr": "Cas",
+      "lines": [
+        ["Schedar", "Caph"],
+        ["Schedar", "Navi"],
+        ["Navi", "Ruchbah"],
+        ["Ruchbah", "Segin"]
+      ]
+    },
+    {
+      "name": "Cygnus",
+      "abbr": "Cyg",
+      "lines": [
+        ["Deneb", "Sadr"],
+        ["Sadr", "Albireo"],
+        ["Sadr", "Aljanah"],
+        ["Sadr", "Delta Cyg"],
+        ["Delta Cyg", "Deneb"]
+      ]
+    },
+    {
+      "name": "Lyra",
+      "abbr": "Lyr",
+      "lines": [
+        ["Vega", "Epsilon1 Lyr"],
+        ["Vega", "Zeta1 Lyr"],
+        ["Zeta1 Lyr", "Sheliak"],
+        ["Sheliak", "Sulafat"],
+        ["Sulafat", "Delta2 Lyr"],
+        ["Delta2 Lyr", "Zeta1 Lyr"]
+      ]
+    },
+    {
+      "name": "Aquila",
+      "abbr": "Aql",
+      "lines": [
+        ["Altair", "Alshain"],
+        ["Altair", "Tarazed"],
+        ["Tarazed", "Delta Aql"],
+        ["Delta Aql", "Zeta Aql"],
+        ["Zeta Aql", "Epsilon Aql"],
+        ["Alshain", "Theta Aql"]
+      ]
+    },
+    {
+      "name": "Leo",
+      "abbr": "Leo",
+      "lines": [
+        ["Regulus", "Eta Leo"],
+        ["Eta Leo", "Algieba"],
+        ["Algieba", "Zeta Leo"],
+        ["Zeta Leo", "Mu Leo"],
+        ["Algieba", "Epsilon Leo"],
+        ["Regulus", "Theta Leo"],
+        ["Theta Leo", "Denebola"],
+        ["Denebola", "Zosma"],
+        ["Zosma", "Theta Leo"]
+      ]
+    },
+    {
+      "name": "Scorpius",
+      "abbr": "Sco",
+      "lines": [
+        ["Antares", "Dschubba"],
+        ["Dschubba", "Acrab"],
+        ["Acrab", "Pi Sco"],
+        ["Antares", "Tau Sco"],
+        ["Tau Sco", "Larawag"],
+        ["Larawag", "Kappa Sco"],
+        ["Kappa Sco", "Sargas"],
+        ["Sargas", "Shaula"],
+        ["Shaula", "Lesath"]
+      ]
+    },
+    {
+      "name": "Sagittarius",
+      "abbr": "Sgr",
+      "lines": [
+        ["Kaus Australis", "Kaus Media"],
+        ["Kaus Media", "Kaus Borealis"],
+        ["Kaus Media", "Gamma Sgr"],
+        ["Gamma Sgr", "Delta Sgr"],
+        ["Kaus Australis", "Ascella"],
+        ["Ascella", "Phi Sgr"],
+        ["Phi Sgr", "Nunki"],
+        ["Nunki", "Tau Sgr"],
+        ["Tau Sgr", "Ascella"]
+      ]
+    },
+    {
+      "name": "Gemini",
+      "abbr": "Gem",
+      "lines": [
+        ["Castor", "Pollux"],
+        ["Castor", "Tau Gem"],
+        ["Tau Gem", "Theta Gem"],
+        ["Pollux", "Kappa Gem"],
+        ["Kappa Gem", "Delta Gem"],
+        ["Delta Gem", "Zeta Gem"],
+        ["Zeta Gem", "Gamma Gem"],
+        ["Gamma Gem", "Xi Gem"],
+        ["Xi Gem", "Alhena"],
+        ["Castor", "Mebsuta"],
+        ["Mebsuta", "Mu Gem"]
+      ]
+    },
+    {
+      "name": "Taurus",
+      "abbr": "Tau",
+      "lines": [
+        ["Aldebaran", "Theta2 Tau"],
+        ["Theta2 Tau", "Gamma Tau"],
+        ["Gamma Tau", "Delta1 Tau"],
+        ["Delta1 Tau", "Epsilon Tau"],
+        ["Aldebaran", "Zeta Tau"],
+        ["Zeta Tau", "Elnath"]
+      ]
+    },
+    {
+      "name": "Canis Major",
+      "abbr": "CMa",
+      "lines": [
+        ["Sirius", "Mirzam"],
+        ["Sirius", "Mirzam"],
+        ["Sirius", "Adhara"],
+        ["Adhara", "Wezen"],
+        ["Wezen", "Aludra"],
+        ["Sirius", "Delta CMa"]
+      ]
+    },
+    {
+      "name": "Canis Minor",
+      "abbr": "CMi",
+      "lines": [
+        ["Procyon", "Beta CMi"]
+      ]
+    },
+    {
+      "name": "Bootes",
+      "abbr": "Boo",
+      "lines": [
+        ["Arcturus", "Izar"],
+        ["Izar", "Delta Boo"],
+        ["Delta Boo", "Nekkar"],
+        ["Nekkar", "Gamma Boo"],
+        ["Gamma Boo", "Rho Boo"],
+        ["Rho Boo", "Arcturus"],
+        ["Arcturus", "Eta Boo"],
+        ["Arcturus", "Zeta Boo"]
+      ]
+    },
+    {
+      "name": "Virgo",
+      "abbr": "Vir",
+      "lines": [
+        ["Spica", "Theta Vir"],
+        ["Theta Vir", "Gamma Vir"],
+        ["Gamma Vir", "Eta Vir"],
+        ["Gamma Vir", "Delta Vir"],
+        ["Delta Vir", "Vindemiatrix"],
+        ["Vindemiatrix", "109 Vir"],
+        ["109 Vir", "Mu Vir"],
+        ["Mu Vir", "Iota Vir"],
+        ["Iota Vir", "Spica"]
+      ]
+    },
+    {
+      "name": "Corona Borealis",
+      "abbr": "CrB",
+      "lines": [
+        ["Alphecca", "Theta CrB"],
+        ["Theta CrB", "Beta CrB"],
+        ["Beta CrB", "Alphecca"],
+        ["Alphecca", "Gamma CrB"],
+        ["Gamma CrB", "Delta CrB"],
+        ["Delta CrB", "Epsilon CrB"],
+        ["Epsilon CrB", "Iota CrB"]
+      ]
+    },
+    {
+      "name": "Hercules",
+      "abbr": "Her",
+      "lines": [
+        ["Kornephoros", "Zeta Her"],
+        ["Zeta Her", "Eta Her"],
+        ["Eta Her", "Pi Her"],
+        ["Pi Her", "Epsilon Her"],
+        ["Epsilon Her", "Zeta Her"],
+        ["Kornephoros", "Delta Her"],
+        ["Delta Her", "Lambda Her"],
+        ["Lambda Her", "Mu Her"],
+        ["Delta Her", "Rasalgethi"]
+      ]
+    },
+    {
+      "name": "Draco",
+      "abbr": "Dra",
+      "lines": [
+        ["Eltanin", "Rastaban"],
+        ["Rastaban", "Xi Dra"],
+        ["Xi Dra", "Nu1 Dra"],
+        ["Nu1 Dra", "Delta Dra"],
+        ["Delta Dra", "Epsilon Dra"],
+        ["Epsilon Dra", "Chi Dra"],
+        ["Eltanin", "Eta Dra"],
+        ["Eta Dra", "Theta Dra"],
+        ["Theta Dra", "Iota Dra"],
+        ["Iota Dra", "Thuban"],
+        ["Thuban", "Kappa Dra"],
+        ["Kappa Dra", "Lambda Dra"]
+      ]
+    },
+    {
+      "name": "Pegasus",
+      "abbr": "Peg",
+      "lines": [
+        ["Markab", "Scheat"],
+        ["Scheat", "Alpheratz"],
+        ["Alpheratz", "Algenib"],
+        ["Algenib", "Markab"],
+        ["Scheat", "Matar"],
+        ["Matar", "Theta Peg"],
+        ["Markab", "Enif"]
+      ]
+    },
+    {
+      "name": "Andromeda",
+      "abbr": "And",
+      "lines": [
+        ["Alpheratz", "Delta And"],
+        ["Delta And", "Mirach"],
+        ["Mirach", "Almach"]
+      ]
+    },
+    {
+      "name": "Perseus",
+      "abbr": "Per",
+      "lines": [
+        ["Mirfak", "Delta Per"],
+        ["Delta Per", "Algol"],
+        ["Algol", "Rho Per"],
+        ["Mirfak", "Epsilon Per"],
+        ["Epsilon Per", "Zeta Per"],
+        ["Mirfak", "Gamma Per"]
+      ]
+    },
+    {
+      "name": "Auriga",
+      "abbr": "Aur",
+      "lines": [
+        ["Capella", "Menkalinan"],
+        ["Menkalinan", "Theta Aur"],
+        ["Theta Aur", "Hassaleh"],
+        ["Hassaleh", "Capella"],
+        ["Capella", "Elnath"]
+      ]
+    },
+    {
+      "name": "Cepheus",
+      "abbr": "Cep",
+      "lines": [
+        ["Alderamin", "Zeta Cep"],
+        ["Zeta Cep", "Delta Cep"],
+        ["Delta Cep", "Epsilon Cep"],
+        ["Epsilon Cep", "Alderamin"],
+        ["Zeta Cep", "Iota Cep"],
+        ["Iota Cep", "Gamma Cep"]
+      ]
+    },
+    {
+      "name": "Cetus",
+      "abbr": "Cet",
+      "lines": [
+        ["Menkar", "Gamma Cet"],
+        ["Gamma Cet", "Alpha Cet"],
+        ["Alpha Cet", "Lambda Cet"],
+        ["Menkar", "Delta Cet"],
+        ["Delta Cet", "Diphda"],
+        ["Diphda", "Iota Cet"],
+        ["Iota Cet", "Tau Cet"]
+      ]
+    },
+    {
+      "name": "Aries",
+      "abbr": "Ari",
+      "lines": [
+        ["Hamal", "Sheratan"],
+        ["Sheratan", "Mesarthim"]
+      ]
+    },
+    {
+      "name": "Pisces",
+      "abbr": "Psc",
+      "lines": [
+        ["Eta Psc", "Omicron Psc"],
+        ["Omicron Psc", "Alpha Psc"],
+        ["Alpha Psc", "Gamma Psc"],
+        ["Gamma Psc", "Theta Psc"],
+        ["Theta Psc", "Iota Psc"],
+        ["Iota Psc", "Lambda Psc"]
+      ]
+    },
+    {
+      "name": "Aquarius",
+      "abbr": "Aqr",
+      "lines": [
+        ["Sadalmelik", "Sadalsuud"],
+        ["Sadalsuud", "Beta Aqr"],
+        ["Sadalmelik", "Sadachbia"],
+        ["Sadachbia", "Zeta Aqr"],
+        ["Zeta Aqr", "Eta Aqr"],
+        ["Sadachbia", "Delta Aqr"]
+      ]
+    },
+    {
+      "name": "Capricornus",
+      "abbr": "Cap",
+      "lines": [
+        ["Algedi", "Dabih"],
+        ["Dabih", "Psi Cap"],
+        ["Psi Cap", "Omega Cap"],
+        ["Omega Cap", "Zeta Cap"],
+        ["Zeta Cap", "Delta Cap"],
+        ["Delta Cap", "Gamma Cap"],
+        ["Gamma Cap", "Algedi"]
+      ]
+    },
+    {
+      "name": "Libra",
+      "abbr": "Lib",
+      "lines": [
+        ["Zubenelgenubi", "Zubeneschamali"],
+        ["Zubeneschamali", "Gamma Lib"],
+        ["Gamma Lib", "Zubenelgenubi"],
+        ["Zubenelgenubi", "Sigma Lib"]
+      ]
+    },
+    {
+      "name": "Ophiuchus",
+      "abbr": "Oph",
+      "lines": [
+        ["Rasalhague", "Kappa Oph"],
+        ["Kappa Oph", "Zeta Oph"],
+        ["Zeta Oph", "Eta Oph"],
+        ["Eta Oph", "Xi Ser"],
+        ["Rasalhague", "Cebalrai"],
+        ["Cebalrai", "Delta Oph"],
+        ["Delta Oph", "Yed Prior"],
+        ["Yed Prior", "Yed Posterior"]
+      ]
+    },
+    {
+      "name": "Serpens",
+      "abbr": "Ser",
+      "lines": [
+        ["Unukalhai", "Delta Ser"],
+        ["Delta Ser", "Epsilon Ser"],
+        ["Epsilon Ser", "Mu Ser"],
+        ["Unukalhai", "Beta Ser"],
+        ["Beta Ser", "Gamma Ser"],
+        ["Gamma Ser", "Kappa Ser"]
+      ]
+    },
+    {
+      "name": "Corvus",
+      "abbr": "Crv",
+      "lines": [
+        ["Gienah", "Algorab"],
+        ["Algorab", "Delta Crv"],
+        ["Delta Crv", "Kraz"],
+        ["Kraz", "Gienah"],
+        ["Kraz", "Epsilon Crv"]
+      ]
+    },
+    {
+      "name": "Hydra",
+      "abbr": "Hya",
+      "lines": [
+        ["Alphard", "Theta Hya"],
+        ["Theta Hya", "Iota Hya"],
+        ["Iota Hya", "Lambda Hya"],
+        ["Lambda Hya", "Mu Hya"],
+        ["Mu Hya", "Nu Hya"],
+        ["Nu Hya", "Xi Hya"],
+        ["Alphard", "Zeta Hya"],
+        ["Zeta Hya", "Epsilon Hya"],
+        ["Epsilon Hya", "Delta Hya"]
+      ]
+    },
+    {
+      "name": "Cancer",
+      "abbr": "Cnc",
+      "lines": [
+        ["Acubens", "Delta Cnc"],
+        ["Delta Cnc", "Gamma Cnc"],
+        ["Gamma Cnc", "Iota Cnc"],
+        ["Delta Cnc", "Beta Cnc"]
+      ]
+    },
+    {
+      "name": "Centaurus",
+      "abbr": "Cen",
+      "lines": [
+        ["Alpha Centauri", "Hadar"],
+        ["Hadar", "Epsilon Cen"],
+        ["Epsilon Cen", "Zeta Cen"],
+        ["Zeta Cen", "Eta Cen"],
+        ["Eta Cen", "Menkent"],
+        ["Menkent", "Iota Cen"],
+        ["Iota Cen", "Gamma Cen"],
+        ["Gamma Cen", "Delta Cen"]
+      ]
+    },
+    {
+      "name": "Crux",
+      "abbr": "Cru",
+      "lines": [
+        ["Acrux", "Gacrux"],
+        ["Mimosa", "Delta Cru"]
+      ]
+    },
+    {
+      "name": "Carina",
+      "abbr": "Car",
+      "lines": [
+        ["Canopus", "Miaplacidus"],
+        ["Miaplacidus", "Avior"],
+        ["Avior", "Aspidiske"],
+        ["Aspidiske", "Tureis"]
+      ]
+    },
+    {
+      "name": "Vela",
+      "abbr": "Vel",
+      "lines": [
+        ["Gamma Vel", "Delta Vel"],
+        ["Delta Vel", "Kappa Vel"],
+        ["Kappa Vel", "Phi Vel"],
+        ["Phi Vel", "Lambda Vel"],
+        ["Lambda Vel", "Gamma Vel"]
+      ]
+    },
+    {
+      "name": "Puppis",
+      "abbr": "Pup",
+      "lines": [
+        ["Naos", "Rho Pup"],
+        ["Rho Pup", "Xi Pup"],
+        ["Naos", "Pi Pup"],
+        ["Pi Pup", "Nu Pup"]
+      ]
+    },
+    {
+      "name": "Lupus",
+      "abbr": "Lup",
+      "lines": [
+        ["Alpha Lup", "Beta Lup"],
+        ["Beta Lup", "Delta Lup"],
+        ["Delta Lup", "Gamma Lup"],
+        ["Gamma Lup", "Epsilon Lup"],
+        ["Epsilon Lup", "Zeta Lup"],
+        ["Zeta Lup", "Eta Lup"]
+      ]
+    },
+    {
+      "name": "Ara",
+      "abbr": "Ara",
+      "lines": [
+        ["Beta Ara", "Gamma Ara"],
+        ["Gamma Ara", "Delta Ara"],
+        ["Delta Ara", "Zeta Ara"],
+        ["Zeta Ara", "Eta Ara"]
+      ]
+    },
+    {
+      "name": "Triangulum Australe",
+      "abbr": "TrA",
+      "lines": [
+        ["Atria", "Beta TrA"],
+        ["Beta TrA", "Gamma TrA"],
+        ["Gamma TrA", "Atria"]
+      ]
+    },
+    {
+      "name": "Pavo",
+      "abbr": "Pav",
+      "lines": [
+        ["Peacock", "Beta Pav"],
+        ["Beta Pav", "Delta Pav"],
+        ["Delta Pav", "Epsilon Pav"]
+      ]
+    },
+    {
+      "name": "Grus",
+      "abbr": "Gru",
+      "lines": [
+        ["Alnair", "Tiaki"],
+        ["Tiaki", "Delta Gru"],
+        ["Delta Gru", "Epsilon Gru"],
+        ["Alnair", "Gamma Gru"]
+      ]
+    },
+    {
+      "name": "Phoenix",
+      "abbr": "Phe",
+      "lines": [
+        ["Ankaa", "Beta Phe"],
+        ["Beta Phe", "Gamma Phe"],
+        ["Gamma Phe", "Delta Phe"],
+        ["Delta Phe", "Ankaa"]
+      ]
+    },
+    {
+      "name": "Eridanus",
+      "abbr": "Eri",
+      "lines": [
+        ["Achernar", "Phi Eri"],
+        ["Phi Eri", "Chi Eri"],
+        ["Chi Eri", "Theta1 Eri"],
+        ["Theta1 Eri", "Eta Eri"],
+        ["Eta Eri", "Tau Cet"],
+        ["Eta Eri", "Zaurak"],
+        ["Zaurak", "Delta Eri"],
+        ["Delta Eri", "Epsilon Eri"],
+        ["Epsilon Eri", "Beta Eri"]
+      ]
+    },
+    {
+      "name": "Lepus",
+      "abbr": "Lep",
+      "lines": [
+        ["Arneb", "Nihal"],
+        ["Nihal", "Epsilon Lep"],
+        ["Arneb", "Mu Lep"],
+        ["Mu Lep", "Lambda Lep"]
+      ]
+    },
+    {
+      "name": "Columba",
+      "abbr": "Col",
+      "lines": [
+        ["Phact", "Wazn"],
+        ["Wazn", "Epsilon Col"],
+        ["Phact", "Delta Col"]
+      ]
+    },
+    {
+      "name": "Tucana",
+      "abbr": "Tuc",
+      "lines": [
+        ["Alpha Tuc", "Beta Tuc"],
+        ["Beta Tuc", "Gamma Tuc"],
+        ["Gamma Tuc", "Zeta Tuc"]
+      ]
+    },
+    {
+      "name": "Indus",
+      "abbr": "Ind",
+      "lines": [
+        ["Alpha Ind", "Beta Ind"],
+        ["Beta Ind", "Delta Ind"]
+      ]
+    },
+    {
+      "name": "Piscis Austrinus",
+      "abbr": "PsA",
+      "lines": [
+        ["Fomalhaut", "Epsilon PsA"],
+        ["Epsilon PsA", "Delta PsA"],
+        ["Delta PsA", "Gamma PsA"],
+        ["Gamma PsA", "Beta PsA"]
+      ]
+    }
+  ]
+}

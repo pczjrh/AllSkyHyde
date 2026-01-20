@@ -437,6 +437,59 @@
                             </div>
                         </div>
 
+                        <!-- Star Map Settings -->
+                        <div class="settings-group">
+                            <h3>Star Map Overlay</h3>
+                            <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
+                                Display bright stars from the Yale Bright Star Catalog overlaid on the image.
+                            </p>
+
+                            <div class="toggle-container">
+                                <span class="toggle-text">Show Star Map</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="starmapEnabled" class="toggle-checkbox">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="setting-item" style="margin-top: 15px;">
+                                <label for="starmapMagnitudeLimit">Magnitude Limit:</label>
+                                <input type="number" id="starmapMagnitudeLimit" min="1.0" max="5.0" step="0.5"
+                                       placeholder="4.0" value="4.0">
+                                <span class="setting-hint">1.0 (brightest only) to 5.0 (more stars)</span>
+                            </div>
+
+                            <div class="toggle-container" style="margin-top: 10px;">
+                                <span class="toggle-text">Show Star Names</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="starmapShowNames" class="toggle-checkbox" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="toggle-container" style="margin-top: 10px;">
+                                <span class="toggle-text">Show Constellation Lines</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="starmapShowConstellations" class="toggle-checkbox" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+
+                            <div class="setting-item" style="margin-top: 15px;">
+                                <label for="starmapOpacity">Opacity:</label>
+                                <input type="range" id="starmapOpacity" min="0.1" max="1.0" step="0.1" value="0.8"
+                                       style="width: 100%;">
+                                <span class="setting-hint" id="starmapOpacityValue">0.8</span>
+                            </div>
+
+                            <div class="setting-item" style="margin-top: 15px;">
+                                <label for="starmapColor">Star Color:</label>
+                                <input type="color" id="starmapColor" value="#FFD700"
+                                       style="width: 60px; height: 30px; border: none; cursor: pointer;">
+                                <span class="setting-hint">Color for stars and labels</span>
+                            </div>
+                        </div>
+
                         <!-- Save Button -->
                         <div class="settings-actions">
                             <button id="saveSettingsButton" class="primary-button">Save Settings</button>
@@ -690,6 +743,16 @@
                     document.getElementById('compassRotation').value = data.compass_rotation !== undefined ? data.compass_rotation : 0;
                     updateCompassPreview(data.compass_rotation || 0);
 
+                    // Load starmap settings
+                    console.log('Loading starmap settings:', data.starmap_enabled, data.starmap_magnitude_limit);
+                    document.getElementById('starmapEnabled').checked = data.starmap_enabled || false;
+                    document.getElementById('starmapMagnitudeLimit').value = data.starmap_magnitude_limit !== undefined ? data.starmap_magnitude_limit : 4.0;
+                    document.getElementById('starmapShowNames').checked = data.starmap_show_names !== undefined ? data.starmap_show_names : true;
+                    document.getElementById('starmapShowConstellations').checked = data.starmap_show_constellations !== undefined ? data.starmap_show_constellations : true;
+                    document.getElementById('starmapOpacity').value = data.starmap_opacity !== undefined ? data.starmap_opacity : 0.8;
+                    document.getElementById('starmapOpacityValue').textContent = data.starmap_opacity !== undefined ? data.starmap_opacity : 0.8;
+                    document.getElementById('starmapColor').value = data.starmap_color || '#FFD700';
+
                     settingsLoaded = true;
 
                     // Update solar info if location is set
@@ -722,6 +785,12 @@
             const ftpRemotePath = document.getElementById('ftpRemotePath').value;
             const compassEnabled = document.getElementById('compassEnabled').checked;
             const compassRotation = document.getElementById('compassRotation').value;
+            const starmapEnabled = document.getElementById('starmapEnabled').checked;
+            const starmapMagnitudeLimit = document.getElementById('starmapMagnitudeLimit').value;
+            const starmapShowNames = document.getElementById('starmapShowNames').checked;
+            const starmapShowConstellations = document.getElementById('starmapShowConstellations').checked;
+            const starmapOpacity = document.getElementById('starmapOpacity').value;
+            const starmapColor = document.getElementById('starmapColor').value;
 
             const settings = {
                 latitude: latitude ? parseFloat(latitude) : null,
@@ -742,7 +811,13 @@
                 ftp_password: ftpPassword || null,
                 ftp_remote_path: ftpRemotePath || null,
                 compass_enabled: compassEnabled,
-                compass_rotation: compassRotation ? parseInt(compassRotation) : 0
+                compass_rotation: compassRotation ? parseInt(compassRotation) : 0,
+                starmap_enabled: starmapEnabled,
+                starmap_magnitude_limit: starmapMagnitudeLimit ? parseFloat(starmapMagnitudeLimit) : 4.0,
+                starmap_show_names: starmapShowNames,
+                starmap_show_constellations: starmapShowConstellations,
+                starmap_opacity: starmapOpacity ? parseFloat(starmapOpacity) : 0.8,
+                starmap_color: starmapColor || '#FFD700'
             };
 
             console.log('Saving compass settings:', settings.compass_enabled, settings.compass_rotation);
@@ -811,6 +886,11 @@
         // Event listener for compass rotation input
         document.getElementById('compassRotation').addEventListener('input', function() {
             updateCompassPreview(this.value);
+        });
+
+        // Event listener for starmap opacity slider
+        document.getElementById('starmapOpacity').addEventListener('input', function() {
+            document.getElementById('starmapOpacityValue').textContent = this.value;
         });
 
         // Event listeners for settings

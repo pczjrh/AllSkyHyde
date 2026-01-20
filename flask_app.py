@@ -80,7 +80,13 @@ app_settings = {
     "ftp_password": None,
     "ftp_remote_path": None,
     "compass_rotation": 0,
-    "compass_enabled": True
+    "compass_enabled": True,
+    "starmap_enabled": False,
+    "starmap_magnitude_limit": 4.0,
+    "starmap_show_names": True,
+    "starmap_show_constellations": True,
+    "starmap_opacity": 0.8,
+    "starmap_color": "#FFD700"
 }
 
 # NOTE: Configuration loading moved to after function definitions to avoid import errors
@@ -1056,18 +1062,20 @@ def index():
 
     # NOTE: Removed run_capture_script() call from here!
 
-    # Get compass settings - read fresh from config file to handle multi-worker scenarios
+    # Get compass and starmap settings - read fresh from config file to handle multi-worker scenarios
     compass_rotation = 0
     compass_enabled = True
+    starmap_enabled = False
     try:
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r') as f:
                 config = json.load(f)
                 compass_rotation = config.get('settings', {}).get('compass_rotation', 0)
                 compass_enabled = config.get('settings', {}).get('compass_enabled', True)
+                starmap_enabled = config.get('settings', {}).get('starmap_enabled', False)
     except Exception as e:
-        print(f"Error reading compass settings: {e}")
-    print(f"Index page - Compass: enabled={compass_enabled}, rotation={compass_rotation}")
+        print(f"Error reading settings: {e}")
+    print(f"Index page - Compass: enabled={compass_enabled}, rotation={compass_rotation}, Starmap: enabled={starmap_enabled}")
 
     response = app.make_response(render_template('index.html',
                            latest_image=latest_image,
@@ -1075,7 +1083,8 @@ def index():
                            last_capture_timestamp=last_capture_timestamp,
                            background_running=background_capture_enabled,
                            compass_rotation=compass_rotation,
-                           compass_enabled=compass_enabled))
+                           compass_enabled=compass_enabled,
+                           starmap_enabled=starmap_enabled))
 
     # Add cache control headers to prevent browser caching
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -2175,6 +2184,19 @@ def api_settings():
             if 'compass_enabled' in data:
                 app_settings['compass_enabled'] = bool(data['compass_enabled'])
                 print(f"Compass enabled set to: {app_settings['compass_enabled']}")
+            if 'starmap_enabled' in data:
+                app_settings['starmap_enabled'] = bool(data['starmap_enabled'])
+                print(f"Starmap enabled set to: {app_settings['starmap_enabled']}")
+            if 'starmap_magnitude_limit' in data:
+                app_settings['starmap_magnitude_limit'] = min(5.0, max(1.0, float(data['starmap_magnitude_limit'])))
+            if 'starmap_show_names' in data:
+                app_settings['starmap_show_names'] = bool(data['starmap_show_names'])
+            if 'starmap_show_constellations' in data:
+                app_settings['starmap_show_constellations'] = bool(data['starmap_show_constellations'])
+            if 'starmap_opacity' in data:
+                app_settings['starmap_opacity'] = min(1.0, max(0.1, float(data['starmap_opacity'])))
+            if 'starmap_color' in data:
+                app_settings['starmap_color'] = data['starmap_color']
 
             # Save configuration to file
             save_config()
@@ -2604,6 +2626,228 @@ def api_night_info():
 
     except Exception as e:
         app.logger.error(f"Error calculating night info: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "status": "error",
+            "message": f"Error: {str(e)}"
+        }), 500
+
+
+@app.route('/api/starmap')
+def api_starmap():
+    """Calculate star positions for the starmap overlay"""
+    global app_settings
+
+    # Camera parameters from plate solving
+    CAMERA_FOV_RADIUS = 54.211  # degrees from zenith
+    PIXEL_SCALE = 244  # arcsec/pixel
+    CAMERA_ROTATION = 91.6  # degrees E of N
+    IMAGE_WIDTH = 1280  # pixels (estimated)
+    IMAGE_HEIGHT = 960  # pixels (estimated)
+
+    if app_settings['latitude'] is None or app_settings['longitude'] is None:
+        return jsonify({
+            "status": "error",
+            "message": "Location not set. Please configure your location in the Control Panel."
+        })
+
+    if not app_settings.get('starmap_enabled', False):
+        return jsonify({
+            "status": "disabled",
+            "message": "Star map is disabled"
+        })
+
+    try:
+        import math
+        from datetime import datetime
+
+        lat = app_settings['latitude']
+        lon = app_settings['longitude']
+        mag_limit = app_settings.get('starmap_magnitude_limit', 4.0)
+
+        # Get current UTC time
+        now = datetime.utcnow()
+
+        # Calculate Julian Date
+        def julian_date(dt):
+            """Calculate Julian Date from datetime"""
+            a = (14 - dt.month) // 12
+            y = dt.year + 4800 - a
+            m = dt.month + 12 * a - 3
+            jdn = dt.day + (153 * m + 2) // 5 + 365 * y + y // 4 - y // 100 + y // 400 - 32045
+            jd = jdn + (dt.hour - 12) / 24.0 + dt.minute / 1440.0 + dt.second / 86400.0
+            return jd
+
+        # Calculate Local Sidereal Time
+        def calculate_lst(lon, dt):
+            """Calculate Local Sidereal Time in hours"""
+            jd = julian_date(dt)
+            # Julian centuries from J2000.0
+            t = (jd - 2451545.0) / 36525.0
+            # Greenwich Mean Sidereal Time in degrees
+            gmst = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * t * t - t * t * t / 38710000.0
+            gmst = gmst % 360.0
+            # Local Sidereal Time
+            lst = gmst + lon
+            lst = lst % 360.0
+            return lst / 15.0  # Convert to hours
+
+        # Convert RA/Dec to Alt/Az
+        def equatorial_to_altaz(ra_hours, dec_deg, lat_deg, lst_hours):
+            """Convert equatorial coordinates to altitude/azimuth"""
+            # Convert to radians
+            ra = math.radians(ra_hours * 15.0)  # RA hours to degrees to radians
+            dec = math.radians(dec_deg)
+            lat = math.radians(lat_deg)
+            lst = math.radians(lst_hours * 15.0)  # LST hours to degrees to radians
+
+            # Hour angle
+            ha = lst - ra
+
+            # Calculate altitude
+            sin_alt = math.sin(dec) * math.sin(lat) + math.cos(dec) * math.cos(lat) * math.cos(ha)
+            alt = math.asin(max(-1.0, min(1.0, sin_alt)))
+
+            # Calculate azimuth
+            cos_az = (math.sin(dec) - math.sin(alt) * math.sin(lat)) / (math.cos(alt) * math.cos(lat))
+            cos_az = max(-1.0, min(1.0, cos_az))
+            az = math.acos(cos_az)
+
+            if math.sin(ha) > 0:
+                az = 2 * math.pi - az
+
+            return math.degrees(alt), math.degrees(az)
+
+        # Gnomonic projection for zenith-pointing camera
+        def gnomonic_projection(alt, az, rotation_deg, img_width, img_height, pixel_scale):
+            """Project alt/az to pixel coordinates using gnomonic projection"""
+            # Zenith distance (90 - altitude)
+            zd = 90.0 - alt
+
+            if zd > CAMERA_FOV_RADIUS:
+                return None, None  # Outside FOV
+
+            # Convert to radians
+            zd_rad = math.radians(zd)
+            az_rad = math.radians(az)
+            rot_rad = math.radians(rotation_deg)
+
+            # Gnomonic projection
+            r = math.tan(zd_rad)
+
+            # Apply rotation (camera orientation)
+            az_rotated = az_rad - rot_rad
+
+            # Calculate x, y in tangent plane (radians)
+            x_tan = r * math.sin(az_rotated)
+            y_tan = -r * math.cos(az_rotated)  # Negative because y increases downward on image
+
+            # Convert to pixels (r is in radians, need to convert to arcsec then to pixels)
+            # pixel_scale is arcsec/pixel
+            scale = (180.0 / math.pi) * 3600.0 / pixel_scale  # radians to pixels
+
+            x_pix = x_tan * scale + img_width / 2
+            y_pix = y_tan * scale + img_height / 2
+
+            return x_pix, y_pix
+
+        # Load star catalog
+        import os
+        catalog_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'data', 'bright_stars.json')
+
+        if not os.path.exists(catalog_path):
+            return jsonify({
+                "status": "error",
+                "message": "Star catalog not found"
+            })
+
+        with open(catalog_path, 'r') as f:
+            catalog = json.load(f)
+
+        # Calculate LST
+        lst = calculate_lst(lon, now)
+
+        # Process each star
+        visible_stars = []
+        for star in catalog['stars']:
+            # Skip stars fainter than magnitude limit
+            if star['mag'] > mag_limit:
+                continue
+
+            # Convert RA/Dec to Alt/Az
+            alt, az = equatorial_to_altaz(star['ra'], star['dec'], lat, lst)
+
+            # Skip stars below horizon
+            if alt < 0:
+                continue
+
+            # Project to pixel coordinates
+            x, y = gnomonic_projection(alt, az, CAMERA_ROTATION, IMAGE_WIDTH, IMAGE_HEIGHT, PIXEL_SCALE)
+
+            if x is not None and y is not None:
+                visible_stars.append({
+                    "name": star.get('name', ''),
+                    "bayer": star.get('bayer', ''),
+                    "x": round(x, 1),
+                    "y": round(y, 1),
+                    "mag": star['mag'],
+                    "alt": round(alt, 1),
+                    "az": round(az, 1)
+                })
+
+        # Build constellation lines if enabled
+        constellation_lines = []
+        show_constellations = app_settings.get('starmap_show_constellations', True)
+
+        if show_constellations:
+            # Create a lookup dictionary for star positions by name
+            star_positions = {}
+            for star in visible_stars:
+                if star['name']:
+                    star_positions[star['name']] = {'x': star['x'], 'y': star['y']}
+                if star.get('bayer'):
+                    star_positions[star['bayer']] = {'x': star['x'], 'y': star['y']}
+
+            # Load constellation lines data
+            constellation_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'data', 'constellation_lines.json')
+
+            if os.path.exists(constellation_path):
+                with open(constellation_path, 'r') as f:
+                    constellation_data = json.load(f)
+
+                for constellation in constellation_data.get('constellations', []):
+                    for line in constellation.get('lines', []):
+                        if len(line) == 2:
+                            star1_name, star2_name = line
+                            # Check if both stars are visible
+                            star1_pos = star_positions.get(star1_name)
+                            star2_pos = star_positions.get(star2_name)
+
+                            if star1_pos and star2_pos:
+                                constellation_lines.append({
+                                    'x1': star1_pos['x'],
+                                    'y1': star1_pos['y'],
+                                    'x2': star2_pos['x'],
+                                    'y2': star2_pos['y'],
+                                    'constellation': constellation.get('abbr', '')
+                                })
+
+        return jsonify({
+            "status": "success",
+            "timestamp": now.isoformat(),
+            "lst": round(lst, 4),
+            "star_count": len(visible_stars),
+            "line_count": len(constellation_lines),
+            "fov_radius": CAMERA_FOV_RADIUS,
+            "image_width": IMAGE_WIDTH,
+            "image_height": IMAGE_HEIGHT,
+            "stars": visible_stars,
+            "constellation_lines": constellation_lines
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error calculating star positions: {str(e)}")
         import traceback
         traceback.print_exc()
         return jsonify({

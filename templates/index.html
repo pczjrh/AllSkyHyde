@@ -39,6 +39,9 @@
                                     </div>
                                 </div>
                                 {% endif %}
+                                {% if starmap_enabled %}
+                                <canvas id="starmapCanvas" class="starmap-overlay"></canvas>
+                                {% endif %}
                             </div>
 
                             <div class="image-controls">
@@ -220,6 +223,9 @@
     
     <script src="{{ url_for('static', filename='js/zoom.js') }}"></script>
     <script src="{{ url_for('static', filename='js/refresh.js') }}"></script>
+    {% if starmap_enabled %}
+    <script src="{{ url_for('static', filename='js/starmap.js') }}"></script>
+    {% endif %}
 </body>
 </html>
 
@@ -343,6 +349,17 @@
         height: 8px;
         background: rgba(255, 255, 255, 0.8);
         border-radius: 50%;
+    }
+
+    /* Star Map Overlay Styles */
+    .starmap-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 999;
     }
 </style>
 
