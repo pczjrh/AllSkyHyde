@@ -39,16 +39,6 @@ def download_hyg_catalog():
             continue
 
     return None
-    print(f"Downloading HYG catalog from {url}...")
-
-    try:
-        with urllib.request.urlopen(url, timeout=60) as response:
-            data = response.read().decode('utf-8')
-            print(f"Downloaded {len(data)} bytes")
-            return data
-    except Exception as e:
-        print(f"Error downloading: {e}")
-        return None
 
 def parse_hyg_catalog(csv_data, max_magnitude=7.0):
     """Parse HYG catalog and extract stars up to max_magnitude"""

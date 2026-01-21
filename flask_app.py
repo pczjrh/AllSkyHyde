@@ -207,8 +207,8 @@ def extract_metadata_from_filename(filename):
         # Try microseconds format
         exposure_match = re.search(r'exp(\d+)us', filename)
         if exposure_match:
-            # Convert microseconds to milliseconds
-            metadata["exposure_ms"] = int(exposure_match.group(1)) / 1000.0
+            # Convert microseconds to milliseconds (as float to preserve precision)
+            metadata["exposure_ms"] = float(int(exposure_match.group(1))) / 1000.0
 
     return metadata
 
@@ -389,16 +389,22 @@ def get_current_twilight_period():
             if astronomical_twilight_end <= current_hour < astronomical_twilight_begin:
                 return 'astronomical_darkness'
 
-        # Check if we're in nautical twilight
-        if sunset_hour <= current_hour < astronomical_twilight_end or astronomical_twilight_begin <= current_hour < sunrise_hour:
+        # Check if we're in nautical twilight (between civil and astronomical twilight)
+        if (civil_twilight_end <= current_hour < nautical_twilight_end or
+            nautical_twilight_begin <= current_hour < civil_twilight_begin):
             return 'nautical_twilight'
 
-        # Check if we're in civil twilight
-        if (sunset_hour - 0.5) <= current_hour < sunset_hour or sunrise_hour <= current_hour < (sunrise_hour + 0.5):
+        # Check if we're in civil twilight (just after sunset or just before sunrise)
+        if (sunset_hour <= current_hour < civil_twilight_end or
+            civil_twilight_begin <= current_hour < sunrise_hour):
             return 'civil_twilight'
 
-        # Otherwise we're in daytime
-        return 'daytime'
+        # Check if we're in daytime (between sunrise and sunset)
+        if sunrise_hour <= current_hour < sunset_hour:
+            return 'daytime'
+
+        # If we reach here, we're in astronomical darkness (fallback for edge cases)
+        return 'astronomical_darkness'
 
     except Exception as e:
         print(f"Error calculating twilight period: {e}")
@@ -2810,6 +2816,9 @@ def api_starmap():
 
             # Convert to pixels (r is in radians, need to convert to arcsec then to pixels)
             # pixel_scale is arcsec/pixel
+            if pixel_scale == 0:
+                return None, None  # Invalid pixel scale
+
             scale = (180.0 / math.pi) * 3600.0 / pixel_scale  # radians to pixels
 
             x_pix = x_tan * scale + img_width / 2

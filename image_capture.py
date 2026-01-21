@@ -384,21 +384,29 @@ def get_solar_period():
 
         # Check astronomical darkness
         if astronomical_twilight_end < astronomical_twilight_begin:
-            if current_hour >= astronomical_twilight_end and current_hour < astronomical_twilight_begin:
-                return 'astronomical_darkness'
-        else:
+            # Crosses midnight
             if current_hour >= astronomical_twilight_end or current_hour < astronomical_twilight_begin:
                 return 'astronomical_darkness'
+        else:
+            if astronomical_twilight_end <= current_hour < astronomical_twilight_begin:
+                return 'astronomical_darkness'
 
-        # Check nautical twilight
-        if sunset_hour <= current_hour < astronomical_twilight_end or astronomical_twilight_begin <= current_hour < sunrise_hour:
+        # Check nautical twilight (between civil and astronomical twilight)
+        if (civil_twilight_end <= current_hour < nautical_twilight_end or
+            nautical_twilight_begin <= current_hour < civil_twilight_begin):
             return 'nautical_twilight'
 
-        # Check civil twilight
-        if (sunset_hour - 0.5) <= current_hour < sunset_hour or sunrise_hour <= current_hour < (sunrise_hour + 0.5):
+        # Check civil twilight (just after sunset or just before sunrise)
+        if (sunset_hour <= current_hour < civil_twilight_end or
+            civil_twilight_begin <= current_hour < sunrise_hour):
             return 'civil_twilight'
 
-        return 'daytime'
+        # Check if we're in daytime (between sunrise and sunset)
+        if sunrise_hour <= current_hour < sunset_hour:
+            return 'daytime'
+
+        # If we reach here, we're in astronomical darkness (fallback for edge cases)
+        return 'astronomical_darkness'
 
     except Exception as e:
         print(f"Warning: Could not determine solar period: {e}")
