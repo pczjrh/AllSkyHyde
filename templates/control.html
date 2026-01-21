@@ -150,6 +150,54 @@
             outline: none;
             border-color: #64b5f6;
         }
+
+        /* Collapsible Section Styles */
+        .collapsible-header {
+            cursor: pointer;
+            padding: 12px 15px;
+            background-color: #2a2a2a;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background-color 0.2s;
+        }
+
+        .collapsible-header:hover {
+            background-color: #333;
+        }
+
+        .collapsible-header h3 {
+            margin: 0;
+            font-size: 1.1em;
+        }
+
+        .collapsible-icon {
+            font-size: 16px;
+            transition: transform 0.3s;
+        }
+
+        .collapsible-icon.open {
+            transform: rotate(180deg);
+        }
+
+        .collapsible-content {
+            display: none;
+            padding: 15px;
+            background-color: #252525;
+            border-radius: 0 0 8px 8px;
+            margin-top: -10px;
+            margin-bottom: 15px;
+        }
+
+        .collapsible-content.open {
+            display: block;
+        }
+
+        .settings-group.collapsible {
+            margin-bottom: 5px;
+        }
     </style>
 </head>
 <body>
@@ -264,46 +312,48 @@
 
                 <!-- FTP/sFTP Transfer Settings -->
                 <div class="control-section">
-                    <div class="deletion-header" style="cursor: pointer; padding: 15px; background-color: #2a2a2a; border-radius: 8px; margin-bottom: 10px;" onclick="toggleFtpSettings()">
-                        <h2 style="margin: 0; display: inline-block;">FTP/sFTP Transfer Settings</h2>
-                        <span id="ftpToggleIcon" style="float: right; font-size: 20px;">▼</span>
-                    </div>
-                    <div id="ftpSettingsPanel" class="settings-group" style="display: none;">
-                        <div class="setting-item">
-                            <label for="ftpProtocol">Protocol:</label>
-                            <select id="ftpProtocol">
-                                <option value="ftp">FTP (port 21)</option>
-                                <option value="sftp">sFTP (port 22)</option>
-                            </select>
-                            <span class="setting-hint">Choose FTP or sFTP</span>
+                    <div class="settings-group collapsible">
+                        <div class="collapsible-header" onclick="toggleSection('ftp')">
+                            <h3>FTP/sFTP Transfer Settings</h3>
+                            <span id="ftpIcon" class="collapsible-icon">▼</span>
                         </div>
-                        <div class="setting-item">
-                            <label for="ftpServer">Server Address:</label>
-                            <input type="text" id="ftpServer"
-                                   placeholder="ftp.example.com" value="">
-                            <span class="setting-hint">FTP/sFTP server hostname or IP</span>
-                        </div>
-                        <div class="setting-item">
-                            <label for="ftpPort">Port:</label>
-                            <input type="number" id="ftpPort" min="1" max="65535"
-                                   placeholder="21" value="21">
-                            <span class="setting-hint">FTP: 21, sFTP: 22</span>
-                        </div>
-                        <div class="setting-item">
-                            <label for="ftpUsername">Username:</label>
-                            <input type="text" id="ftpUsername"
-                                   placeholder="username" value="">
-                        </div>
-                        <div class="setting-item">
-                            <label for="ftpPassword">Password:</label>
-                            <input type="password" id="ftpPassword"
-                                   placeholder="password" value="">
-                        </div>
-                        <div class="setting-item">
-                            <label for="ftpRemotePath">Remote Path:</label>
-                            <input type="text" id="ftpRemotePath"
-                                   placeholder="/path/to/remote/folder" value="">
-                            <span class="setting-hint">Remote directory path</span>
+                        <div id="ftpContent" class="collapsible-content">
+                            <div class="setting-item">
+                                <label for="ftpProtocol">Protocol:</label>
+                                <select id="ftpProtocol">
+                                    <option value="ftp">FTP (port 21)</option>
+                                    <option value="sftp">sFTP (port 22)</option>
+                                </select>
+                                <span class="setting-hint">Choose FTP or sFTP</span>
+                            </div>
+                            <div class="setting-item">
+                                <label for="ftpServer">Server Address:</label>
+                                <input type="text" id="ftpServer"
+                                       placeholder="ftp.example.com" value="">
+                                <span class="setting-hint">FTP/sFTP server hostname or IP</span>
+                            </div>
+                            <div class="setting-item">
+                                <label for="ftpPort">Port:</label>
+                                <input type="number" id="ftpPort" min="1" max="65535"
+                                       placeholder="21" value="21">
+                                <span class="setting-hint">FTP: 21, sFTP: 22</span>
+                            </div>
+                            <div class="setting-item">
+                                <label for="ftpUsername">Username:</label>
+                                <input type="text" id="ftpUsername"
+                                       placeholder="username" value="">
+                            </div>
+                            <div class="setting-item">
+                                <label for="ftpPassword">Password:</label>
+                                <input type="password" id="ftpPassword"
+                                       placeholder="password" value="">
+                            </div>
+                            <div class="setting-item">
+                                <label for="ftpRemotePath">Remote Path:</label>
+                                <input type="text" id="ftpRemotePath"
+                                       placeholder="/path/to/remote/folder" value="">
+                                <span class="setting-hint">Remote directory path</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -315,178 +365,241 @@
                         <h2>Location & Settings</h2>
 
                         <!-- Location Settings -->
-                        <div class="settings-group">
-                            <h3>Location</h3>
-                            <div class="setting-item">
-                                <label for="latitude">Latitude:</label>
-                                <input type="number" id="latitude" step="0.0001" min="-90" max="90"
-                                       placeholder="e.g., 40.7128" value="">
-                                <span class="setting-hint">-90 to 90</span>
+                        <div class="settings-group collapsible">
+                            <div class="collapsible-header" onclick="toggleSection('location')">
+                                <h3>Location</h3>
+                                <span id="locationIcon" class="collapsible-icon">▼</span>
                             </div>
+                            <div id="locationContent" class="collapsible-content">
+                                <div class="setting-item">
+                                    <label for="latitude">Latitude:</label>
+                                    <input type="number" id="latitude" step="0.0001" min="-90" max="90"
+                                           placeholder="e.g., 40.7128" value="">
+                                    <span class="setting-hint">-90 to 90</span>
+                                </div>
 
-                            <div class="setting-item">
-                                <label for="longitude">Longitude:</label>
-                                <input type="number" id="longitude" step="0.0001" min="-180" max="180"
-                                       placeholder="e.g., -74.0060" value="">
-                                <span class="setting-hint">-180 to 180</span>
+                                <div class="setting-item">
+                                    <label for="longitude">Longitude:</label>
+                                    <input type="number" id="longitude" step="0.0001" min="-180" max="180"
+                                           placeholder="e.g., -74.0060" value="">
+                                    <span class="setting-hint">-180 to 180</span>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Time Settings -->
-                        <div class="settings-group">
-                            <h3>Time Settings</h3>
-                            <div class="setting-item">
-                                <label for="dstEnabled">
-                                    <input type="checkbox" id="dstEnabled">
-                                    Daylight Saving Time
-                                </label>
+                        <div class="settings-group collapsible">
+                            <div class="collapsible-header" onclick="toggleSection('time')">
+                                <h3>Time Settings</h3>
+                                <span id="timeIcon" class="collapsible-icon">▼</span>
                             </div>
+                            <div id="timeContent" class="collapsible-content">
+                                <div class="setting-item">
+                                    <label for="dstEnabled">
+                                        <input type="checkbox" id="dstEnabled">
+                                        Daylight Saving Time
+                                    </label>
+                                </div>
 
-                            <div class="setting-item">
-                                <label for="timezone">Timezone Offset (hours):</label>
-                                <input type="number" id="timezone" step="0.5" min="-12" max="14"
-                                       placeholder="e.g., -5" value="">
-                                <span class="setting-hint">UTC offset</span>
+                                <div class="setting-item">
+                                    <label for="timezone">Timezone Offset (hours):</label>
+                                    <input type="number" id="timezone" step="0.5" min="-12" max="14"
+                                           placeholder="e.g., -5" value="">
+                                    <span class="setting-hint">UTC offset</span>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Weather API Settings -->
-                        <div class="settings-group">
-                            <h3>Weather API</h3>
-                            <div class="setting-item">
-                                <label for="openweatherApiKey">OpenWeather API Key:</label>
-                                <input type="text" id="openweatherApiKey"
-                                       placeholder="Enter API key" value="">
-                                <span class="setting-hint">Get free API key at <a href="https://openweathermap.org/api" target="_blank">openweathermap.org</a></span>
+                        <div class="settings-group collapsible">
+                            <div class="collapsible-header" onclick="toggleSection('weather')">
+                                <h3>Weather API</h3>
+                                <span id="weatherIcon" class="collapsible-icon">▼</span>
+                            </div>
+                            <div id="weatherContent" class="collapsible-content">
+                                <div class="setting-item">
+                                    <label for="openweatherApiKey">OpenWeather API Key:</label>
+                                    <input type="text" id="openweatherApiKey"
+                                           placeholder="Enter API key" value="">
+                                    <span class="setting-hint">Get free API key at <a href="https://openweathermap.org/api" target="_blank">openweathermap.org</a></span>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Capture Period Settings -->
-                        <div class="settings-group">
-                            <h3>Capture Periods</h3>
-                            <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
-                                Enable automatic capture during selected periods:
-                            </p>
-
-                            <div class="toggle-container">
-                                <span class="toggle-text">Daytime</span>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="captureDaytime" class="toggle-checkbox">
-                                    <span class="toggle-slider"></span>
-                                </label>
+                        <div class="settings-group collapsible">
+                            <div class="collapsible-header" onclick="toggleSection('capture')">
+                                <h3>Capture Periods</h3>
+                                <span id="captureIcon" class="collapsible-icon">▼</span>
                             </div>
+                            <div id="captureContent" class="collapsible-content">
+                                <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
+                                    Enable automatic capture during selected periods:
+                                </p>
 
-                            <div class="toggle-container">
-                                <span class="toggle-text">Civil Twilight</span>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="captureCivilTwilight" class="toggle-checkbox">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
+                                <div class="toggle-container">
+                                    <span class="toggle-text">Daytime</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="captureDaytime" class="toggle-checkbox">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
 
-                            <div class="toggle-container">
-                                <span class="toggle-text">Nautical Twilight</span>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="captureNauticalTwilight" class="toggle-checkbox">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
+                                <div class="toggle-container">
+                                    <span class="toggle-text">Civil Twilight</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="captureCivilTwilight" class="toggle-checkbox">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
 
-                            <div class="toggle-container">
-                                <span class="toggle-text">Astronomical Darkness</span>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="captureAstronomicalDarkness" class="toggle-checkbox">
-                                    <span class="toggle-slider"></span>
-                                </label>
+                                <div class="toggle-container">
+                                    <span class="toggle-text">Nautical Twilight</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="captureNauticalTwilight" class="toggle-checkbox">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+
+                                <div class="toggle-container">
+                                    <span class="toggle-text">Astronomical Darkness</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="captureAstronomicalDarkness" class="toggle-checkbox">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Compass Settings -->
-                        <div class="settings-group">
-                            <h3>Compass Overlay</h3>
-                            <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
-                                Configure the compass overlay shown on the latest image.
-                            </p>
-
-                            <div class="toggle-container">
-                                <span class="toggle-text">Show Compass</span>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="compassEnabled" class="toggle-checkbox">
-                                    <span class="toggle-slider"></span>
-                                </label>
+                        <div class="settings-group collapsible">
+                            <div class="collapsible-header" onclick="toggleSection('compass')">
+                                <h3>Compass Overlay</h3>
+                                <span id="compassIcon" class="collapsible-icon">▼</span>
                             </div>
+                            <div id="compassContent" class="collapsible-content">
+                                <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
+                                    Configure the compass overlay shown on the latest image.
+                                </p>
 
-                            <div class="setting-item" style="margin-top: 15px;">
-                                <label for="compassRotation">Rotation (degrees):</label>
-                                <input type="number" id="compassRotation" min="0" max="359" step="1"
-                                       placeholder="0" value="0">
-                                <span class="setting-hint">0-359 (0 = N at bottom-left)</span>
-                            </div>
-
-                            <div class="compass-preview" style="margin-top: 15px; text-align: center;">
-                                <div id="compassPreview" style="display: inline-block; width: 80px; height: 80px; position: relative;">
-                                    <div style="width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); border: 2px solid rgba(255, 255, 255, 0.7); border-radius: 50%; position: relative;">
-                                        <span style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); color: #ff6b6b; font-weight: bold; font-size: 14px;">N</span>
-                                        <span style="position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); color: white; font-weight: bold; font-size: 14px;">S</span>
-                                        <span style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: white; font-weight: bold; font-size: 14px;">E</span>
-                                        <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: white; font-weight: bold; font-size: 14px;">W</span>
-                                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background: rgba(255, 255, 255, 0.8); border-radius: 50%;"></div>
-                                    </div>
+                                <div class="toggle-container">
+                                    <span class="toggle-text">Show Compass</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="compassEnabled" class="toggle-checkbox">
+                                        <span class="toggle-slider"></span>
+                                    </label>
                                 </div>
-                                <div style="font-size: 0.8em; color: #999; margin-top: 5px;">Preview</div>
+
+                                <div class="setting-item" style="margin-top: 15px;">
+                                    <label for="compassRotation">Rotation (degrees):</label>
+                                    <input type="number" id="compassRotation" min="0" max="359" step="1"
+                                           placeholder="0" value="0">
+                                    <span class="setting-hint">0-359 (0 = N at bottom-left)</span>
+                                </div>
+
+                                <div class="compass-preview" style="margin-top: 15px; text-align: center;">
+                                    <div id="compassPreview" style="display: inline-block; width: 80px; height: 80px; position: relative;">
+                                        <div style="width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); border: 2px solid rgba(255, 255, 255, 0.7); border-radius: 50%; position: relative;">
+                                            <span style="position: absolute; top: 5px; left: 50%; transform: translateX(-50%); color: #ff6b6b; font-weight: bold; font-size: 14px;">N</span>
+                                            <span style="position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); color: white; font-weight: bold; font-size: 14px;">S</span>
+                                            <span style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: white; font-weight: bold; font-size: 14px;">E</span>
+                                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: white; font-weight: bold; font-size: 14px;">W</span>
+                                            <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background: rgba(255, 255, 255, 0.8); border-radius: 50%;"></div>
+                                        </div>
+                                    </div>
+                                    <div style="font-size: 0.8em; color: #999; margin-top: 5px;">Preview</div>
+                                </div>
                             </div>
                         </div>
 
                         <!-- Star Map Settings -->
-                        <div class="settings-group">
-                            <h3>Star Map Overlay</h3>
-                            <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
-                                Display bright stars from the Yale Bright Star Catalog overlaid on the image.
-                            </p>
-
-                            <div class="toggle-container">
-                                <span class="toggle-text">Show Star Map</span>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="starmapEnabled" class="toggle-checkbox">
-                                    <span class="toggle-slider"></span>
-                                </label>
+                        <div class="settings-group collapsible">
+                            <div class="collapsible-header" onclick="toggleSection('starmap')">
+                                <h3>Star Map Overlay</h3>
+                                <span id="starmapIcon" class="collapsible-icon">▼</span>
                             </div>
+                            <div id="starmapContent" class="collapsible-content">
+                                <p style="font-size: 0.9em; color: #999; margin-bottom: 15px;">
+                                    Display bright stars from the Yale Bright Star Catalog overlaid on the image.
+                                </p>
 
-                            <div class="setting-item" style="margin-top: 15px;">
-                                <label for="starmapMagnitudeLimit">Magnitude Limit:</label>
-                                <input type="number" id="starmapMagnitudeLimit" min="1.0" max="5.0" step="0.5"
-                                       placeholder="4.0" value="4.0">
-                                <span class="setting-hint">1.0 (brightest only) to 5.0 (more stars)</span>
-                            </div>
+                                <div class="toggle-container">
+                                    <span class="toggle-text">Show Star Map</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="starmapEnabled" class="toggle-checkbox">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
 
-                            <div class="toggle-container" style="margin-top: 10px;">
-                                <span class="toggle-text">Show Star Names</span>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="starmapShowNames" class="toggle-checkbox" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
+                                <div class="setting-item" style="margin-top: 15px;">
+                                    <label for="starmapMagnitudeLimit">Magnitude Limit:</label>
+                                    <input type="number" id="starmapMagnitudeLimit" min="1.0" max="7.0" step="0.5"
+                                           placeholder="4.0" value="4.0">
+                                    <span class="setting-hint">1.0 (brightest only) to 7.0 (more stars)</span>
+                                </div>
 
-                            <div class="toggle-container" style="margin-top: 10px;">
-                                <span class="toggle-text">Show Constellation Lines</span>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="starmapShowConstellations" class="toggle-checkbox" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
+                                <div class="toggle-container" style="margin-top: 10px;">
+                                    <span class="toggle-text">Show Star Names</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="starmapShowNames" class="toggle-checkbox" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
 
-                            <div class="setting-item" style="margin-top: 15px;">
-                                <label for="starmapOpacity">Opacity:</label>
-                                <input type="range" id="starmapOpacity" min="0.1" max="1.0" step="0.1" value="0.8"
-                                       style="width: 100%;">
-                                <span class="setting-hint" id="starmapOpacityValue">0.8</span>
-                            </div>
+                                <div class="toggle-container" style="margin-top: 10px;">
+                                    <span class="toggle-text">Show Constellation Lines</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="starmapShowConstellations" class="toggle-checkbox" checked>
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
 
-                            <div class="setting-item" style="margin-top: 15px;">
-                                <label for="starmapColor">Star Color:</label>
-                                <input type="color" id="starmapColor" value="#FFD700"
-                                       style="width: 60px; height: 30px; border: none; cursor: pointer;">
-                                <span class="setting-hint">Color for stars and labels</span>
+                                <div class="setting-item" style="margin-top: 15px;">
+                                    <label for="starmapOpacity">Opacity:</label>
+                                    <input type="range" id="starmapOpacity" min="0.1" max="1.0" step="0.1" value="0.8"
+                                           style="width: 100%;">
+                                    <span class="setting-hint" id="starmapOpacityValue">0.8</span>
+                                </div>
+
+                                <div class="setting-item" style="margin-top: 15px;">
+                                    <label for="starmapColor">Star Color:</label>
+                                    <input type="color" id="starmapColor" value="#FFD700"
+                                           style="width: 60px; height: 30px; border: none; cursor: pointer;">
+                                    <span class="setting-hint">Color for stars and labels</span>
+                                </div>
+
+                                <div class="setting-item" style="margin-top: 15px;">
+                                    <label for="starmapRotationAdjust">Rotation Adjustment:</label>
+                                    <input type="number" id="starmapRotationAdjust" min="-180" max="180" step="1"
+                                           placeholder="0" value="0" style="width: 80px;">
+                                    <span class="setting-hint">Fine-tune rotation in degrees (-180 to 180)</span>
+                                </div>
+
+                                <div class="setting-item" style="margin-top: 15px;">
+                                    <label>Position Offset:</label>
+                                    <div style="display: flex; gap: 10px; align-items: center; margin-top: 5px;">
+                                        <span>X:</span>
+                                        <input type="number" id="starmapOffsetX" min="-500" max="500" step="1"
+                                               placeholder="0" value="0" style="width: 70px;">
+                                        <span>Y:</span>
+                                        <input type="number" id="starmapOffsetY" min="-500" max="500" step="1"
+                                               placeholder="0" value="0" style="width: 70px;">
+                                    </div>
+                                    <span class="setting-hint">Offset in pixels (-500 to 500)</span>
+                                </div>
+
+                                <div class="setting-item" style="margin-top: 15px;">
+                                    <label>Scale Adjustment:</label>
+                                    <div style="display: flex; gap: 10px; align-items: center; margin-top: 5px;">
+                                        <span>X:</span>
+                                        <input type="number" id="starmapScaleX" min="0.5" max="2.0" step="0.01"
+                                               placeholder="1.0" value="1.0" style="width: 70px;">
+                                        <span>Y:</span>
+                                        <input type="number" id="starmapScaleY" min="0.5" max="2.0" step="0.01"
+                                               placeholder="1.0" value="1.0" style="width: 70px;">
+                                    </div>
+                                    <span class="setting-hint">Scale factor (0.5 to 2.0, 1.0 = normal)</span>
+                                </div>
                             </div>
                         </div>
 
@@ -660,17 +773,17 @@
             window.location.href = '/api/download_logs';
         });
 
-        // FTP Settings Toggle
-        function toggleFtpSettings() {
-            const panel = document.getElementById('ftpSettingsPanel');
-            const icon = document.getElementById('ftpToggleIcon');
+        // Generic Section Toggle
+        function toggleSection(sectionName) {
+            const content = document.getElementById(sectionName + 'Content');
+            const icon = document.getElementById(sectionName + 'Icon');
 
-            if (panel.style.display === 'none') {
-                panel.style.display = 'block';
-                icon.textContent = '▲';
+            if (content.classList.contains('open')) {
+                content.classList.remove('open');
+                icon.classList.remove('open');
             } else {
-                panel.style.display = 'none';
-                icon.textContent = '▼';
+                content.classList.add('open');
+                icon.classList.add('open');
             }
         }
 
@@ -752,6 +865,11 @@
                     document.getElementById('starmapOpacity').value = data.starmap_opacity !== undefined ? data.starmap_opacity : 0.8;
                     document.getElementById('starmapOpacityValue').textContent = data.starmap_opacity !== undefined ? data.starmap_opacity : 0.8;
                     document.getElementById('starmapColor').value = data.starmap_color || '#FFD700';
+                    document.getElementById('starmapRotationAdjust').value = data.starmap_rotation_adjust !== undefined ? data.starmap_rotation_adjust : 0;
+                    document.getElementById('starmapOffsetX').value = data.starmap_offset_x !== undefined ? data.starmap_offset_x : 0;
+                    document.getElementById('starmapOffsetY').value = data.starmap_offset_y !== undefined ? data.starmap_offset_y : 0;
+                    document.getElementById('starmapScaleX').value = data.starmap_scale_x !== undefined ? data.starmap_scale_x : 1.0;
+                    document.getElementById('starmapScaleY').value = data.starmap_scale_y !== undefined ? data.starmap_scale_y : 1.0;
 
                     settingsLoaded = true;
 
@@ -791,6 +909,11 @@
             const starmapShowConstellations = document.getElementById('starmapShowConstellations').checked;
             const starmapOpacity = document.getElementById('starmapOpacity').value;
             const starmapColor = document.getElementById('starmapColor').value;
+            const starmapRotationAdjust = document.getElementById('starmapRotationAdjust').value;
+            const starmapOffsetX = document.getElementById('starmapOffsetX').value;
+            const starmapOffsetY = document.getElementById('starmapOffsetY').value;
+            const starmapScaleX = document.getElementById('starmapScaleX').value;
+            const starmapScaleY = document.getElementById('starmapScaleY').value;
 
             const settings = {
                 latitude: latitude ? parseFloat(latitude) : null,
@@ -817,7 +940,12 @@
                 starmap_show_names: starmapShowNames,
                 starmap_show_constellations: starmapShowConstellations,
                 starmap_opacity: starmapOpacity ? parseFloat(starmapOpacity) : 0.8,
-                starmap_color: starmapColor || '#FFD700'
+                starmap_color: starmapColor || '#FFD700',
+                starmap_rotation_adjust: starmapRotationAdjust ? parseInt(starmapRotationAdjust) : 0,
+                starmap_offset_x: starmapOffsetX ? parseInt(starmapOffsetX) : 0,
+                starmap_offset_y: starmapOffsetY ? parseInt(starmapOffsetY) : 0,
+                starmap_scale_x: starmapScaleX ? parseFloat(starmapScaleX) : 1.0,
+                starmap_scale_y: starmapScaleY ? parseFloat(starmapScaleY) : 1.0
             };
 
             console.log('Saving compass settings:', settings.compass_enabled, settings.compass_rotation);

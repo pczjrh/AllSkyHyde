@@ -29,8 +29,9 @@
                 
                 <div class="image-detail-grid">
                     <div class="image-wrapper" id="imageWrapper">
-                        <img id="zoomableImage" src="{{ url_for('serve_image', filename=image.filename) }}" 
+                        <img id="zoomableImage" src="{{ url_for('serve_image', filename=image.filename) }}"
                              alt="{{ image.filename }}" data-filename="{{ image.filename }}">
+                        <canvas id="starmapCanvas" class="starmap-overlay" style="display: none;"></canvas>
                     </div>
                     
                     <div class="image-details">
@@ -39,6 +40,7 @@
                             <button id="zoomOut">Zoom Out</button>
                             <button id="resetZoom">Reset</button>
                             <span class="zoom-level">Zoom: <span id="zoomLevel">100%</span></span>
+                            <button id="toggleStarmap" class="starmap-toggle-btn">Show Star Map</button>
                         </div>
                         
                         <div class="metadata-panel">
@@ -86,5 +88,314 @@
     </footer>
     
     <script src="{{ url_for('static', filename='js/zoom.js') }}"></script>
+
+    <style>
+        /* Star Map Overlay Styles */
+        .starmap-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        .starmap-toggle-btn {
+            margin-left: 15px;
+            background-color: #4a4a4a;
+            border: 1px solid #666;
+        }
+
+        .starmap-toggle-btn.active {
+            background-color: #2a5a2a;
+            border-color: #4a8a4a;
+        }
+    </style>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // Configuration from server
+        const IMAGE_TIMESTAMP = '{{ image_timestamp_iso }}';
+        const SETTINGS = {
+            showNames: {{ starmap_settings.show_names|lower }},
+            showConstellations: {{ starmap_settings.show_constellations|lower }},
+            opacity: {{ starmap_settings.opacity }},
+            color: '{{ starmap_settings.color }}',
+            magnitudeLimit: {{ starmap_settings.magnitude_limit }},
+            rotationAdjust: {{ starmap_settings.rotation_adjust }},
+            offsetX: {{ starmap_settings.offset_x }},
+            offsetY: {{ starmap_settings.offset_y }},
+            scaleX: {{ starmap_settings.scale_x }},
+            scaleY: {{ starmap_settings.scale_y }}
+        };
+        const NAME_MAG_THRESHOLD = 2.0;
+
+        // State
+        let canvas = null;
+        let ctx = null;
+        let stars = [];
+        let constellationLines = [];
+        let imageElement = null;
+        let isVisible = false;
+
+        /**
+         * Initialize the star map overlay
+         */
+        function init() {
+            canvas = document.getElementById('starmapCanvas');
+            if (!canvas) return;
+
+            ctx = canvas.getContext('2d');
+            imageElement = document.getElementById('zoomableImage');
+            if (!imageElement) return;
+
+            // Set up toggle button
+            const toggleBtn = document.getElementById('toggleStarmap');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', toggleStarmap);
+            }
+
+            // Set up resize handling
+            window.addEventListener('resize', handleResize);
+            imageElement.addEventListener('load', handleResize);
+
+            // Initial resize
+            handleResize();
+        }
+
+        /**
+         * Toggle star map visibility
+         */
+        function toggleStarmap() {
+            const toggleBtn = document.getElementById('toggleStarmap');
+            isVisible = !isVisible;
+
+            if (isVisible) {
+                canvas.style.display = 'block';
+                toggleBtn.textContent = 'Hide Star Map';
+                toggleBtn.classList.add('active');
+                // Fetch stars for the image capture time
+                fetchStars();
+            } else {
+                canvas.style.display = 'none';
+                toggleBtn.textContent = 'Show Star Map';
+                toggleBtn.classList.remove('active');
+                clearCanvas();
+            }
+        }
+
+        /**
+         * Fetch star positions from the API for the image capture time
+         */
+        async function fetchStars() {
+            try {
+                const url = `/api/starmap?timestamp=${encodeURIComponent(IMAGE_TIMESTAMP)}&skip_enabled_check=true`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    stars = data.stars;
+                    constellationLines = data.constellation_lines || [];
+                    render();
+                } else {
+                    console.error('Error fetching stars:', data.message);
+                    alert('Error loading star map: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Error fetching star data:', error);
+            }
+        }
+
+        /**
+         * Handle window/image resize
+         */
+        function handleResize() {
+            if (!canvas || !imageElement) return;
+
+            const rect = imageElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+
+            if (isVisible && stars.length > 0) {
+                render();
+            }
+        }
+
+        /**
+         * Clear the canvas
+         */
+        function clearCanvas() {
+            if (!ctx || !canvas) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        /**
+         * Render stars on the canvas
+         */
+        function render() {
+            if (!ctx || !canvas || !isVisible) {
+                clearCanvas();
+                return;
+            }
+
+            clearCanvas();
+
+            // Get scale factors for coordinate transformation
+            const scaleX = canvas.width / 1280;
+            const scaleY = canvas.height / 960;
+
+            ctx.globalAlpha = SETTINGS.opacity;
+
+            // Draw constellation lines first
+            if (SETTINGS.showConstellations && constellationLines.length > 0) {
+                drawConstellationLines(scaleX, scaleY);
+            }
+
+            // Draw each star (flip Y axis and apply adjustments)
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const rotationAdjust = SETTINGS.rotationAdjust * Math.PI / 180;  // Convert to radians
+
+            stars.forEach(star => {
+                if (star.mag > SETTINGS.magnitudeLimit) return;
+
+                // Scale with custom scale factors and flip Y
+                let x = star.x * scaleX * SETTINGS.scaleX;
+                let y = canvas.height - (star.y * scaleY * SETTINGS.scaleY);  // Flip Y axis
+
+                // Adjust for scale center offset
+                x = centerX + (x - centerX * SETTINGS.scaleX);
+                y = centerY + (y - centerY * SETTINGS.scaleY);
+
+                // Apply rotation adjustment around center
+                const dx = x - centerX;
+                const dy = y - centerY;
+                x = centerX + dx * Math.cos(rotationAdjust) - dy * Math.sin(rotationAdjust);
+                y = centerY + dx * Math.sin(rotationAdjust) + dy * Math.cos(rotationAdjust);
+
+                // Apply offset
+                x += SETTINGS.offsetX * scaleX;
+                y += SETTINGS.offsetY * scaleY;
+
+                if (x < 0 || x > canvas.width || y < 0 || y > canvas.height) return;
+
+                const minSize = 1.5;
+                const maxSize = 6;
+                const minMag = -1.5;
+                const maxMag = 4.0;
+                const size = maxSize - ((star.mag - minMag) / (maxMag - minMag)) * (maxSize - minSize);
+
+                drawStar(x, y, Math.max(minSize, size), SETTINGS.color);
+
+                if (SETTINGS.showNames && star.mag < NAME_MAG_THRESHOLD && star.name) {
+                    drawStarName(x, y, star.name, size);
+                }
+            });
+
+            ctx.globalAlpha = 1.0;
+        }
+
+        /**
+         * Draw a single star
+         */
+        function drawStar(x, y, size, color) {
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+
+            if (size > 3) {
+                ctx.beginPath();
+                ctx.arc(x, y, size * 1.5, 0, Math.PI * 2);
+                const gradient = ctx.createRadialGradient(x, y, size * 0.5, x, y, size * 1.5);
+                gradient.addColorStop(0, color);
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+                ctx.fill();
+            }
+        }
+
+        /**
+         * Draw star name label
+         */
+        function drawStarName(x, y, name, starSize) {
+            const offset = starSize + 4;
+            ctx.font = '11px Arial, sans-serif';
+            ctx.fillStyle = SETTINGS.color;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+            ctx.shadowBlur = 3;
+            ctx.shadowOffsetX = 1;
+            ctx.shadowOffsetY = 1;
+            ctx.fillText(name, x + offset, y);
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        }
+
+        /**
+         * Draw constellation lines
+         */
+        function drawConstellationLines(scaleX, scaleY) {
+            ctx.strokeStyle = SETTINGS.color;
+            ctx.lineWidth = 1.5;
+            ctx.globalAlpha = SETTINGS.opacity * 0.6;
+
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const rotationAdjust = SETTINGS.rotationAdjust * Math.PI / 180;
+
+            constellationLines.forEach(line => {
+                // Scale with custom scale factors and flip Y
+                let x1 = line.x1 * scaleX * SETTINGS.scaleX;
+                let y1 = canvas.height - (line.y1 * scaleY * SETTINGS.scaleY);
+                let x2 = line.x2 * scaleX * SETTINGS.scaleX;
+                let y2 = canvas.height - (line.y2 * scaleY * SETTINGS.scaleY);
+
+                // Adjust for scale center offset
+                x1 = centerX + (x1 - centerX * SETTINGS.scaleX);
+                y1 = centerY + (y1 - centerY * SETTINGS.scaleY);
+                x2 = centerX + (x2 - centerX * SETTINGS.scaleX);
+                y2 = centerY + (y2 - centerY * SETTINGS.scaleY);
+
+                // Apply rotation adjustment around center
+                let dx1 = x1 - centerX, dy1 = y1 - centerY;
+                let dx2 = x2 - centerX, dy2 = y2 - centerY;
+                x1 = centerX + dx1 * Math.cos(rotationAdjust) - dy1 * Math.sin(rotationAdjust);
+                y1 = centerY + dx1 * Math.sin(rotationAdjust) + dy1 * Math.cos(rotationAdjust);
+                x2 = centerX + dx2 * Math.cos(rotationAdjust) - dy2 * Math.sin(rotationAdjust);
+                y2 = centerY + dx2 * Math.sin(rotationAdjust) + dy2 * Math.cos(rotationAdjust);
+
+                // Apply offset
+                x1 += SETTINGS.offsetX * scaleX;
+                y1 += SETTINGS.offsetY * scaleY;
+                x2 += SETTINGS.offsetX * scaleX;
+                y2 += SETTINGS.offsetY * scaleY;
+
+                if (x1 < 0 || x1 > canvas.width || y1 < 0 || y1 > canvas.height) return;
+                if (x2 < 0 || x2 > canvas.width || y2 < 0 || y2 > canvas.height) return;
+
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            });
+
+            ctx.globalAlpha = SETTINGS.opacity;
+        }
+
+        // Initialize when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    })();
+    </script>
 </body>
 </html>

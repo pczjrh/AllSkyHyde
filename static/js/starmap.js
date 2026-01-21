@@ -21,7 +21,12 @@
         showConstellations: true,
         opacity: 0.8,
         color: '#FFD700',
-        magnitudeLimit: 4.0
+        magnitudeLimit: 4.0,
+        rotationAdjust: 0,
+        offsetX: 0,
+        offsetY: 0,
+        scaleX: 1.0,
+        scaleY: 1.0
     };
     let updateTimer = null;
     let imageElement = null;
@@ -82,6 +87,11 @@
             settings.opacity = data.starmap_opacity !== undefined ? data.starmap_opacity : 0.8;
             settings.color = data.starmap_color || '#FFD700';
             settings.magnitudeLimit = data.starmap_magnitude_limit !== undefined ? data.starmap_magnitude_limit : 4.0;
+            settings.rotationAdjust = data.starmap_rotation_adjust !== undefined ? data.starmap_rotation_adjust : 0;
+            settings.offsetX = data.starmap_offset_x !== undefined ? data.starmap_offset_x : 0;
+            settings.offsetY = data.starmap_offset_y !== undefined ? data.starmap_offset_y : 0;
+            settings.scaleX = data.starmap_scale_x !== undefined ? data.starmap_scale_x : 1.0;
+            settings.scaleY = data.starmap_scale_y !== undefined ? data.starmap_scale_y : 1.0;
 
             console.log('Star map settings loaded:', settings);
         } catch (error) {
@@ -173,14 +183,33 @@
             console.log(`Not drawing lines: showConstellations=${settings.showConstellations}, lineCount=${constellationLines.length}`);
         }
 
+        // Fine-tuning adjustments
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const rotationAdjust = settings.rotationAdjust * Math.PI / 180;
+
         // Draw each star
         stars.forEach(star => {
             // Skip stars fainter than the current magnitude limit
             if (star.mag > settings.magnitudeLimit) return;
 
-            // Transform coordinates
-            const x = star.x * scaleX;
-            const y = star.y * scaleY;
+            // Scale with custom scale factors and flip Y
+            let x = star.x * scaleX * settings.scaleX;
+            let y = canvas.height - (star.y * scaleY * settings.scaleY);  // Flip Y axis
+
+            // Adjust for scale center offset
+            x = centerX + (x - centerX * settings.scaleX);
+            y = centerY + (y - centerY * settings.scaleY);
+
+            // Apply rotation adjustment around center
+            const dx = x - centerX;
+            const dy = y - centerY;
+            x = centerX + dx * Math.cos(rotationAdjust) - dy * Math.sin(rotationAdjust);
+            y = centerY + dx * Math.sin(rotationAdjust) + dy * Math.cos(rotationAdjust);
+
+            // Apply offset
+            x += settings.offsetX * scaleX;
+            y += settings.offsetY * scaleY;
 
             // Check if within canvas bounds
             if (x < 0 || x > canvas.width || y < 0 || y > canvas.height) return;
@@ -261,12 +290,37 @@
         ctx.lineWidth = 1.5;
         ctx.globalAlpha = settings.opacity * 0.6; // Lines slightly more transparent
 
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const rotationAdjust = settings.rotationAdjust * Math.PI / 180;
+
         let drawnCount = 0;
         constellationLines.forEach(line => {
-            const x1 = line.x1 * scaleX;
-            const y1 = line.y1 * scaleY;
-            const x2 = line.x2 * scaleX;
-            const y2 = line.y2 * scaleY;
+            // Scale with custom scale factors and flip Y
+            let x1 = line.x1 * scaleX * settings.scaleX;
+            let y1 = canvas.height - (line.y1 * scaleY * settings.scaleY);
+            let x2 = line.x2 * scaleX * settings.scaleX;
+            let y2 = canvas.height - (line.y2 * scaleY * settings.scaleY);
+
+            // Adjust for scale center offset
+            x1 = centerX + (x1 - centerX * settings.scaleX);
+            y1 = centerY + (y1 - centerY * settings.scaleY);
+            x2 = centerX + (x2 - centerX * settings.scaleX);
+            y2 = centerY + (y2 - centerY * settings.scaleY);
+
+            // Apply rotation adjustment around center
+            let dx1 = x1 - centerX, dy1 = y1 - centerY;
+            let dx2 = x2 - centerX, dy2 = y2 - centerY;
+            x1 = centerX + dx1 * Math.cos(rotationAdjust) - dy1 * Math.sin(rotationAdjust);
+            y1 = centerY + dx1 * Math.sin(rotationAdjust) + dy1 * Math.cos(rotationAdjust);
+            x2 = centerX + dx2 * Math.cos(rotationAdjust) - dy2 * Math.sin(rotationAdjust);
+            y2 = centerY + dx2 * Math.sin(rotationAdjust) + dy2 * Math.cos(rotationAdjust);
+
+            // Apply offset
+            x1 += settings.offsetX * scaleX;
+            y1 += settings.offsetY * scaleY;
+            x2 += settings.offsetX * scaleX;
+            y2 += settings.offsetY * scaleY;
 
             // Check if line endpoints are within canvas bounds
             if (x1 < 0 || x1 > canvas.width || y1 < 0 || y1 > canvas.height) return;

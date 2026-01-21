@@ -86,7 +86,12 @@ app_settings = {
     "starmap_show_names": True,
     "starmap_show_constellations": True,
     "starmap_opacity": 0.8,
-    "starmap_color": "#FFD700"
+    "starmap_color": "#FFD700",
+    "starmap_rotation_adjust": 0,
+    "starmap_offset_x": 0,
+    "starmap_offset_y": 0,
+    "starmap_scale_x": 1.0,
+    "starmap_scale_y": 1.0
 }
 
 # NOTE: Configuration loading moved to after function definitions to avoid import errors
@@ -1132,6 +1137,8 @@ def gallery():
 @app.route('/image/<path:filename>')
 def image_detail(filename):
     """Detail page for a specific image"""
+    global app_settings
+
     image_path = os.path.join(IMAGE_DIR, filename)
 
     if not os.path.exists(image_path):
@@ -1143,6 +1150,16 @@ def image_detail(filename):
     stats = os.stat(image_path)
     file_size = stats.st_size / (1024 * 1024)  # Convert to MB
 
+    # Get the datetime object for starmap calculation
+    # If we have a datetime from the filename, use it; otherwise use file modified time
+    image_datetime = metadata.get("datetime_obj")
+    if image_datetime:
+        # Convert to ISO format for JavaScript
+        image_timestamp_iso = image_datetime.strftime("%Y-%m-%dT%H:%M:%S")
+    else:
+        # Fallback to file modified time
+        image_timestamp_iso = datetime.fromtimestamp(stats.st_mtime).strftime("%Y-%m-%dT%H:%M:%S")
+
     image_data = {
         "filename": filename,
         "timestamp": metadata["timestamp"],
@@ -1151,7 +1168,24 @@ def image_detail(filename):
         "modified": datetime.fromtimestamp(stats.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     }
 
-    return render_template('image_detail.html', image=image_data)
+    # Get starmap settings for the overlay
+    starmap_settings = {
+        "show_names": app_settings.get('starmap_show_names', True),
+        "show_constellations": app_settings.get('starmap_show_constellations', True),
+        "opacity": app_settings.get('starmap_opacity', 0.8),
+        "color": app_settings.get('starmap_color', '#FFD700'),
+        "magnitude_limit": app_settings.get('starmap_magnitude_limit', 4.0),
+        "rotation_adjust": app_settings.get('starmap_rotation_adjust', 0),
+        "offset_x": app_settings.get('starmap_offset_x', 0),
+        "offset_y": app_settings.get('starmap_offset_y', 0),
+        "scale_x": app_settings.get('starmap_scale_x', 1.0),
+        "scale_y": app_settings.get('starmap_scale_y', 1.0)
+    }
+
+    return render_template('image_detail.html',
+                           image=image_data,
+                           image_timestamp_iso=image_timestamp_iso,
+                           starmap_settings=starmap_settings)
 
 
 @app.route('/control')
@@ -2188,7 +2222,7 @@ def api_settings():
                 app_settings['starmap_enabled'] = bool(data['starmap_enabled'])
                 print(f"Starmap enabled set to: {app_settings['starmap_enabled']}")
             if 'starmap_magnitude_limit' in data:
-                app_settings['starmap_magnitude_limit'] = min(5.0, max(1.0, float(data['starmap_magnitude_limit'])))
+                app_settings['starmap_magnitude_limit'] = min(7.0, max(1.0, float(data['starmap_magnitude_limit'])))
             if 'starmap_show_names' in data:
                 app_settings['starmap_show_names'] = bool(data['starmap_show_names'])
             if 'starmap_show_constellations' in data:
@@ -2197,6 +2231,16 @@ def api_settings():
                 app_settings['starmap_opacity'] = min(1.0, max(0.1, float(data['starmap_opacity'])))
             if 'starmap_color' in data:
                 app_settings['starmap_color'] = data['starmap_color']
+            if 'starmap_rotation_adjust' in data:
+                app_settings['starmap_rotation_adjust'] = max(-180, min(180, int(data['starmap_rotation_adjust'])))
+            if 'starmap_offset_x' in data:
+                app_settings['starmap_offset_x'] = max(-500, min(500, int(data['starmap_offset_x'])))
+            if 'starmap_offset_y' in data:
+                app_settings['starmap_offset_y'] = max(-500, min(500, int(data['starmap_offset_y'])))
+            if 'starmap_scale_x' in data:
+                app_settings['starmap_scale_x'] = max(0.5, min(2.0, float(data['starmap_scale_x'])))
+            if 'starmap_scale_y' in data:
+                app_settings['starmap_scale_y'] = max(0.5, min(2.0, float(data['starmap_scale_y'])))
 
             # Save configuration to file
             save_config()
@@ -2636,7 +2680,14 @@ def api_night_info():
 
 @app.route('/api/starmap')
 def api_starmap():
-    """Calculate star positions for the starmap overlay"""
+    """Calculate star positions for the starmap overlay
+
+    Optional query parameters:
+        timestamp: ISO format timestamp (e.g., '2024-01-15T20:30:00') to calculate
+                   star positions for a specific time instead of current time.
+                   Used for historical images.
+        skip_enabled_check: If 'true', skip the starmap_enabled check (for detail page toggle)
+    """
     global app_settings
 
     # Camera parameters from plate solving
@@ -2652,7 +2703,10 @@ def api_starmap():
             "message": "Location not set. Please configure your location in the Control Panel."
         })
 
-    if not app_settings.get('starmap_enabled', False):
+    # Check if we should skip the enabled check (for image detail page toggle)
+    skip_enabled_check = request.args.get('skip_enabled_check', 'false').lower() == 'true'
+
+    if not skip_enabled_check and not app_settings.get('starmap_enabled', False):
         return jsonify({
             "status": "disabled",
             "message": "Star map is disabled"
@@ -2666,8 +2720,19 @@ def api_starmap():
         lon = app_settings['longitude']
         mag_limit = app_settings.get('starmap_magnitude_limit', 4.0)
 
-        # Get current UTC time
-        now = datetime.utcnow()
+        # Get timestamp - either from query parameter or current UTC time
+        timestamp_param = request.args.get('timestamp')
+        if timestamp_param:
+            try:
+                # Parse ISO format timestamp
+                now = datetime.fromisoformat(timestamp_param.replace('Z', '+00:00').replace('+00:00', ''))
+            except ValueError:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Invalid timestamp format: {timestamp_param}. Use ISO format (e.g., 2024-01-15T20:30:00)"
+                })
+        else:
+            now = datetime.utcnow()
 
         # Calculate Julian Date
         def julian_date(dt):
